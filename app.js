@@ -103,6 +103,7 @@
   }
   function collapse() { document.body.classList.toggle("collapsed"); try { localStorage.setItem("lt-menu", document.body.classList.contains("collapsed") ? "collapsed" : "open"); } catch (e) {} }
   function show(v) {
+    interacaoInit();
     if (Object.keys(S.dirty).length && !confirm("Há alterações não salvas. Descartar?")) return;
     S.dirty = {}; updateSavebar();
     S.view = v; location.hash = v;
@@ -192,7 +193,15 @@
       return true;
     });
   }
+  const FLAB = { de: "De", ate: "Até", origem: "Frente", bloco: "Bloco", consultor: "Consultor", keyuser: "Key user", lado: "Lado", status: "Status", sit: "Situação" };
   function setF(k, v) { FD[k] = v; if (k === "origem") FD.bloco = ""; redrawDash(); }
+  function setMulti(obj) {
+    if (!obj || !Object.keys(obj).length) { limparF(); return; }
+    if (obj.origem && obj.origem !== FD.origem) FD.bloco = "";
+    Object.entries(obj).forEach(([k, v]) => { if (k in FD) FD[k] = v; });
+    if (S.view !== "dashboard") { show("dashboard"); return; }
+    redrawDash(); toast("Filtro aplicado: " + Object.entries(obj).map(([k, v]) => (FLAB[k] || k) + " = " + (k === "de" || k === "ate" ? fmtD(v) : v)).join(" · "));
+  }
   function limparF() { Object.keys(FD).forEach((k) => (FD[k] = "")); redrawDash(); }
   function periodo(p) {
     const r = ref();
@@ -205,16 +214,102 @@
   }
   function redrawDash() { const y = window.scrollY; $("main").innerHTML = vDashboard(); labelCells(); window.scrollTo(0, y); }
 
+  // ---------- interação: dica flutuante, painel de detalhe ----------
+  function interacaoInit() {
+    if (document.body.dataset.ltInter) return;
+    document.body.dataset.ltInter = "1";
+    const tip = document.createElement("div"); tip.className = "tip"; tip.id = "lt-tip"; document.body.appendChild(tip);
+    let cur = null;
+    const mover = (e) => {
+      const alvo = e.target && e.target.closest ? e.target.closest("[data-tip]") : null;
+      if (!alvo) { if (cur) { tip.classList.remove("on"); cur = null; } return; }
+      if (alvo !== cur) { cur = alvo; tip.innerHTML = String(alvo.getAttribute("data-tip") || "").split("|").map((t) => esc(t)).join("<br>"); tip.classList.add("on"); }
+      const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+      let x = e.clientX + pad, y = e.clientY + pad;
+      if (x + w > innerWidth - 8) x = Math.max(8, e.clientX - w - pad);
+      if (y + h > innerHeight - 8) y = Math.max(8, e.clientY - h - pad);
+      tip.style.left = x + "px"; tip.style.top = y + "px";
+    };
+    document.addEventListener("mousemove", mover, { passive: true });
+    document.addEventListener("scroll", () => { tip.classList.remove("on"); cur = null; }, true);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") fecharDet();
+      const el = document.activeElement;
+      if ((e.key === "Enter" || e.key === " ") && el && el.hasAttribute && el.hasAttribute("data-click") && el.tagName !== "INPUT" && el.tagName !== "SELECT" && el.tagName !== "TEXTAREA") { e.preventDefault(); el.click(); }
+    });
+  }
+  function painel(titulo, corpo, sub) {
+    let w = $("det");
+    if (!w) { w = document.createElement("div"); w.id = "det"; w.className = "det-wrap"; document.body.appendChild(w); w.addEventListener("click", (e) => { if (e.target === w) fecharDet(); }); }
+    w.innerHTML = `<aside class="det" role="dialog" aria-modal="true" aria-label="${esc(titulo)}">
+      <header><div><h3>${esc(titulo)}</h3>${sub ? `<div class="dsub">${sub}</div>` : ""}</div>
+      <button class="iconx" onclick="app.fecharDet()" aria-label="Fechar (Esc)">✕</button></header>
+      <div class="dbody">${corpo}</div></aside>`;
+    requestAnimationFrame(() => w.classList.add("on"));
+    const b = w.querySelector(".iconx"); if (b) b.focus();
+  }
+  function fecharDet() { const w = $("det"); if (w) { w.classList.remove("on"); setTimeout(() => { if (w && !w.classList.contains("on")) w.innerHTML = ""; }, 180); } }
+  function abrirAtiv(codigo, origem) {
+    const todas = S.data.atividades || [];
+    const a = todas.find((x) => x.codigo === codigo && (!origem || x.origem === origem)) || todas.find((x) => x.codigo === codigo);
+    if (!a) { toast("Atividade " + codigo + " não encontrada.", true); return; }
+    const irmas = todas.filter((x) => x.origem === a.origem);
+    const r = ref(), sc = situacao(a), du = a.previsao ? diasUteis(r, a.previsao) : null;
+    const dep = dependentes(irmas, a.codigo);
+    const cods = (v) => { const l = String(v || "").split(/[;,]/).map((x) => x.trim()).filter(Boolean); return l.length ? l.map((x) => `<button class="chip mini" onclick="app.abrirAtiv(${esc(JSON.stringify(x))},${esc(JSON.stringify(a.origem))})">${esc(x)}</button>`).join(" ") : '<span class="muted">—</span>'; };
+    const pes = (v, k) => { const l = pessoas(v); return l.length ? l.map((x) => `<button class="chip mini" onclick="app.setMulti({&quot;${k}&quot;:${esc(JSON.stringify(x))}})">${esc(x)}</button>`).join(" ") : '<span class="muted">—</span>'; };
+    const lin = (k, v) => `<div class="drow"><div class="dk">${esc(k)}</div><div class="dv">${v || '<span class="muted">—</span>'}</div></div>`;
+    const pct = Number(a.pct || 0);
+    const pontos = (S.data.pontos || []).filter((x) => (x.atividade_codigo || "") === a.codigo || String(x.descricao || "").includes(a.codigo));
+    const corpo = `
+      <div class="dhero"><div class="pill ${sc[1]}">${esc(sc[0])}</div>
+        <div class="dbar" data-tip="${esc(pct + "% concluído")}"><i style="width:${Math.max(0, Math.min(100, pct))}%"></i></div>
+        <b>${pct}%</b></div>
+      ${lin("Atividade", esc(a.atividade))}
+      ${lin("Frente / bloco", `<button class="chip mini" onclick="app.setMulti({&quot;origem&quot;:${esc(JSON.stringify(a.origem))},&quot;bloco&quot;:${esc(JSON.stringify(a.bloco))}})">${esc(ORIGEM_L[a.origem] || a.origem)} — ${esc(a.bloco)}</button>`)}
+      ${lin("Status", `<span class="pill ${a.status === "Concluído" ? "ok" : a.status === "Bloqueado" ? "bad" : a.status === "Em andamento" ? "info" : "off"}">${esc(a.status)}</span>`)}
+      ${lin("Lado", a.lado ? `<button class="chip mini" onclick="app.setMulti({&quot;lado&quot;:${esc(JSON.stringify(a.lado))}})">${esc(a.lado)}</button>` : "")}
+      ${lin("Consultor", pes(a.consultor, "consultor"))}
+      ${lin("Key user / área", pes(a.key_user, "keyuser"))}
+      ${lin("Início", fmtD(a.inicio))}
+      ${lin("Previsão", a.previsao ? fmtD(a.previsao) + (du !== null && a.status !== "Concluído" ? ` <span class="pill ${du < 0 ? "bad" : du <= 2 ? "warn" : "info"}">${du < 0 ? Math.abs(du) + " d.ú. de atraso" : du + " d.ú. restantes"}</span>` : "") : "")}
+      ${lin("Conclusão", fmtD(a.conclusao))}
+      ${lin("Pré-requisito", esc(a.pre_requisito))}
+      ${lin("Precedentes", cods(a.precedentes))}
+      ${lin("Dependentes", cods(dep))}
+      ${lin("Ponto de atenção", esc(a.ponto_atencao))}
+      ${lin("Observação", esc(a.obs))}
+      ${lin("Última atualização", a.atualizado_em ? fmtD(String(a.atualizado_em).slice(0, 10)) + (a.atualizado_por ? " · " + esc(a.atualizado_por) : "") : "")}
+      ${pontos.length ? `<div class="dsec">Pontos de atenção ligados</div>${pontos.map((x) => `<div class="dnote"><b>${esc(x.tipo)}</b> · ${esc(x.descricao || "").slice(0, 200)}</div>`).join("")}` : ""}
+      <div class="dacts">
+        <button class="btn small" onclick="app.fecharDet();app.show(${esc(JSON.stringify(a.origem))});app.filtro(${esc(JSON.stringify(a.codigo))})">Editar no cronograma</button>
+        <button class="btn ghost dark small" onclick="app.setMulti({&quot;origem&quot;:${esc(JSON.stringify(a.origem))}})">Filtrar esta frente</button>
+      </div>`;
+    painel(a.codigo + " · " + String(a.atividade).slice(0, 60), corpo, `${esc(ORIGEM_L[a.origem] || a.origem)} — ${esc(a.bloco)}`);
+  }
+  function verLista(titulo, chaves) {
+    const todas = S.data.atividades || [];
+    const l = (chaves || []).map((k) => { const [c, o] = String(k).split("@"); return todas.find((x) => x.codigo === c && x.origem === o); }).filter(Boolean);
+    if (!l.length) { toast("Nada a listar.", true); return; }
+    const r = ref();
+    const corpo = `<div class="tbl-wrap"><table><tr><th>Cód.</th><th>Atividade</th><th>Consultor</th><th>Previsão</th><th>Situação</th></tr>
+      ${l.map((a) => { const sc = situacao(a); return `<tr class="rowlink" data-click="1" role="button" tabindex="0" onclick="app.abrirAtiv(${esc(JSON.stringify(a.codigo))},${esc(JSON.stringify(a.origem))})"><td class="c codes">${esc(a.codigo)}</td><td>${esc(String(a.atividade).slice(0, 80))}</td><td>${esc(a.consultor)}</td><td class="c">${fmtD(a.previsao)}</td><td class="c"><span class="pill ${sc[1]}">${esc(sc[0])}</span></td></tr>`; }).join("")}</table></div>`;
+    painel(titulo, corpo, l.length + " atividades · clique em uma linha para ver os detalhes");
+  }
+  function irPontos(tipo) { fecharDet(); show("pontos"); setTimeout(() => filtro(tipo), 30); }
+
   // --- gráficos em SVG puro ---
   const CORES = { "Concluído": "#1ED69E", "Em andamento": "#7FB2F0", "Não iniciado": "#4A5165", "Bloqueado": "#E05C5C" };
   function barrasEmpilhadas(linhas, titulo) {
-    // linhas: [{ label, partes:[{v,cor}], total, extra }]
+    // linhas: [{ label, partes:[{v,cor}], total, extra, f }] — f = filtro aplicado ao clicar
     const max = Math.max(1, ...linhas.map((l) => l.total));
     return `<div class="chart">${linhas.map((l) => {
       let acc = 0;
-      return `<div class="crow"><div class="clbl" title="${esc(l.label)}">${esc(l.label)}</div>
+      const tip = esc([l.label, "Total: " + l.total].concat(l.partes.filter((p) => p.v).map((p) => p.nome + ": " + p.v)).concat(l.f ? ["— clique para filtrar —"] : []).join("|"));
+      const at = l.f ? ` class="crow clickable" data-click="1" role="button" tabindex="0" onclick="app.setMulti(${esc(JSON.stringify(l.f))})"` : ' class="crow"';
+      return `<div${at} data-tip="${tip}"><div class="clbl">${esc(l.label)}</div>
         <div class="cbar"><svg viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="${esc(l.label)}: ${l.total}">
-        ${l.partes.map((p) => { const w = (p.v / max) * 100; const x = acc; acc += w; return p.v ? `<rect x="${x.toFixed(2)}" y="0" width="${w.toFixed(2)}" height="10" fill="${p.cor}"><title>${esc(p.nome)}: ${p.v}</title></rect>` : ""; }).join("")}
+        ${l.partes.map((p) => { const w = (p.v / max) * 100; const x = acc; acc += w; return p.v ? `<rect x="${x.toFixed(2)}" y="0" width="${w.toFixed(2)}" height="10" fill="${p.cor}"/>` : ""; }).join("")}
         </svg></div><div class="cval">${l.extra ?? l.total}</div></div>`;
     }).join("")}</div>`;
   }
@@ -238,7 +333,7 @@
       <line x1="0" y1="${Y(0)}" x2="100" y2="${Y(0)}" stroke="#2A3142" stroke-width=".5"/>
       ${idxHoje >= 0 ? `<line x1="${X(idxHoje).toFixed(2)}" y1="0" x2="${X(idxHoje).toFixed(2)}" y2="${H}" stroke="#FFC000" stroke-width=".4" stroke-dasharray="1.5 1.5"/>` : ""}
       ${linha("p", "#9AA3B8", true)}${linha("r", "#1ED69E", false)}
-      ${pts.map((p, i) => `<circle cx="${X(i).toFixed(2)}" cy="${Y(p.r).toFixed(2)}" r="0.9" fill="#1ED69E"><title>${fmtD(p.s)}: ${p.r} concluídas de ${p.p} previstas</title></circle>`).join("")}
+      ${pts.map((p, i) => `<circle class="pt" cx="${X(i).toFixed(2)}" cy="${Y(p.r).toFixed(2)}" r="1.5" fill="#1ED69E" data-tip="${esc("Semana de " + fmtD(p.s) + "|Previsto acumulado: " + p.p + "|Concluído acumulado: " + p.r + "|Diferença: " + (p.r - p.p))}"/>`).join("")}
     </svg>
     <div class="legend"><span><i style="background:#9AA3B8"></i>Previsto acumulado</span><span><i style="background:#1ED69E"></i>Concluído acumulado</span><span><i style="background:#FFC000"></i>Semana atual</span></div>
     <div class="xaxis">${pts.map((p, i) => (i === 0 || i === pts.length - 1 || i === Math.floor(pts.length / 2) ? `<span style="left:${X(i).toFixed(1)}%">${fmtD(p.s).slice(0, 5)}</span>` : "")).join("")}</div>`;
@@ -248,10 +343,10 @@
     let acc = 0, R = 15.9155;
     return `<div class="donut-wrap"><svg viewBox="0 0 42 42" class="donut" role="img" aria-label="Distribuição por situação">
       <circle cx="21" cy="21" r="${R}" fill="none" stroke="#1B2135" stroke-width="6"/>
-      ${dados.filter((d) => d.v).map((d) => { const pc = (d.v / tot) * 100; const el = `<circle cx="21" cy="21" r="${R}" fill="none" stroke="${d.cor}" stroke-width="6" stroke-dasharray="${pc.toFixed(2)} ${(100 - pc).toFixed(2)}" stroke-dashoffset="${(25 - acc).toFixed(2)}"><title>${esc(d.nome)}: ${d.v} (${pc.toFixed(0)}%)</title></circle>`; acc += pc; return el; }).join("")}
+      ${dados.filter((d) => d.v).map((d) => { const pc = (d.v / tot) * 100; const el = `<circle class="slice" cx="21" cy="21" r="${R}" fill="none" stroke="${d.cor}" stroke-width="6" stroke-dasharray="${pc.toFixed(2)} ${(100 - pc).toFixed(2)}" stroke-dashoffset="${(25 - acc).toFixed(2)}" data-tip="${esc(d.nome + "|" + d.v + " atividades (" + pc.toFixed(0) + "%)|— clique para filtrar —")}" onclick="app.setF('sit',${esc(JSON.stringify(d.nome === "Concluída" ? "Concluída" : d.nome))})"/>`; acc += pc; return el; }).join("")}
       <text x="21" y="20.5" text-anchor="middle" font-size="7" fill="#fff" font-weight="bold" font-family="Arial">${tot}</text>
       <text x="21" y="25.5" text-anchor="middle" font-size="3" fill="#9AA3B8" font-family="Arial">atividades</text>
-    </svg><div class="legend col">${dados.filter((d) => d.v).map((d) => `<span><i style="background:${d.cor}"></i>${esc(d.nome)} <b>${d.v}</b></span>`).join("")}</div></div>`;
+    </svg><div class="legend col">${dados.filter((d) => d.v).map((d) => `<span class="clickable" data-click="1" role="button" tabindex="0" onclick="app.setF('sit',${esc(JSON.stringify(d.nome))})" data-tip="${esc("Filtrar por: " + d.nome)}"><i style="background:${d.cor}"></i>${esc(d.nome)} <b>${d.v}</b></span>`).join("")}</div></div>`;
   }
 
   function vDashboard() {
@@ -279,27 +374,27 @@
     const porFrente = uniq(ativ.map((a) => a.origem + " · " + a.bloco)).map((k) => {
       const [o, b] = k.split(" · "); const l = ativ.filter((a) => a.origem === o && a.bloco === b);
       const rr = resumoFrente(l);
-      return { label: (ORIGEM_L[o] || o) + " — " + b, total: l.length, extra: rr.pct.toFixed(0) + "%",
+      return { label: (ORIGEM_L[o] || o) + " — " + b, total: l.length, extra: rr.pct.toFixed(0) + "%", f: { origem: o, bloco: b },
         partes: STATUS.map((s) => ({ nome: s, v: l.filter((a) => a.status === s).length, cor: CORES[s] })) };
     }).sort((a, b) => b.total - a.total);
     // por consultor
     const porConsultor = consultores.map((c) => {
       const l = ativ.filter((a) => pessoas(a.consultor).includes(c));
       const atr = l.filter((a) => situacao(a)[0] === "Atrasada").length;
-      return { label: c, total: l.length, extra: l.length + (atr ? ` · ${atr} atras.` : ""),
+      return { label: c, total: l.length, extra: l.length + (atr ? ` · ${atr} atras.` : ""), f: { consultor: c },
         partes: STATUS.map((s) => ({ nome: s, v: l.filter((a) => a.status === s).length, cor: CORES[s] })) };
     }).filter((x) => x.total).sort((a, b) => b.total - a.total);
     // por área (key user)
     const porArea = keyusers.map((c) => {
       const l = ativ.filter((a) => pessoas(a.key_user).includes(c));
-      return { label: c, total: l.length, extra: l.length,
+      return { label: c, total: l.length, extra: l.length, f: { keyuser: c },
         partes: STATUS.map((s) => ({ nome: s, v: l.filter((a) => a.status === s).length, cor: CORES[s] })) };
     }).filter((x) => x.total).sort((a, b) => b.total - a.total).slice(0, 12);
     // entregas por semana
     const sems = uniq(ativ.filter((a) => a.previsao).map((a) => semana(a.previsao)));
     const porSemana = sems.map((s) => {
       const l = ativ.filter((a) => a.previsao && semana(a.previsao) === s);
-      return { label: "Semana de " + fmtD(s), total: l.length, extra: l.length,
+      return { label: "Semana de " + fmtD(s), total: l.length, extra: l.length, f: { de: s, ate: addDias(s, 6) },
         partes: STATUS.map((st) => ({ nome: st, v: l.filter((a) => a.status === st).length, cor: CORES[st] })) };
     });
     const sitDados = [["Concluída", "#1ED69E"], ["No prazo", "#7FB2F0"], ["Vence em até 2 dias", "#FFC000"], ["Atrasada", "#E05C5C"], ["Bloqueada", "#8B2B3A"], ["Sem data", "#4A5165"]]
@@ -309,6 +404,11 @@
     const semDono = ativ.filter((a) => !a.consultor || /designar|definir/i.test(a.consultor));
     const paradas = ativ.filter((a) => a.status === "Em andamento" && a.atualizado_em && diasUteis(String(a.atualizado_em).slice(0, 10), r) > 5);
 
+    const kpi = (lbl, val, note, cls, f, tip) => `<div class="card clickable" data-click="1" role="button" tabindex="0" onclick="app.setMulti(${esc(JSON.stringify(f))})" data-tip="${esc(tip)}"><div class="lbl">${esc(lbl)}</div><div class="val ${cls || ""}">${val}</div><div class="note">${note}</div></div>`;
+    const risco = (nome, qtd, leitura, lista) => {
+      const at = qtd ? ' class="rowlink" data-click="1" role="button" tabindex="0" onclick="app.verLista(' + esc(JSON.stringify(nome)) + ',' + esc(JSON.stringify(lista.map((a) => a.codigo + "@" + a.origem))) + ')" data-tip="' + esc("Clique para ver as " + qtd + " atividades") + '"' : "";
+      return "<tr" + at + "><td>" + esc(nome) + '</td><td class="c">' + qtd + '</td><td class="muted">' + esc(leitura) + "</td></tr>";
+    };
     const sel = (k, lista, label) => `<label class="fl"><span>${label}</span><select onchange="app.setF('${k}',this.value)"><option value="">Todos</option>${lista.map((o) => `<option value="${esc(o.v ?? o)}" ${(FD[k] === (o.v ?? o)) ? "selected" : ""}>${esc(o.l ?? o)}</option>`).join("")}</select></label>`;
     const nFiltros = Object.values(FD).filter(Boolean).length;
 
@@ -324,6 +424,7 @@
 
       <div class="section filtros no-print">
         <h3>Filtros ${nFiltros ? `<span class="pill ok">${nFiltros} ativo(s)</span>` : '<span class="tag">nenhum filtro: projeto inteiro</span>'}</h3>
+        ${nFiltros ? `<div class="fativos">${Object.entries(FD).filter(([, v]) => v).map(([k, v]) => `<button class="chip on" onclick="app.setF('${k}','')" data-tip="${esc("Remover filtro: " + (FLAB[k] || k))}">${esc(FLAB[k] || k)}: <b>${esc(k === "de" || k === "ate" ? fmtD(v) : v)}</b> ✕</button>`).join("")}</div>` : ""}
         <div class="fgrid">
           <label class="fl"><span>Período — de</span><input type="date" value="${esc(FD.de)}" onchange="app.setF('de',this.value)"></label>
           <label class="fl"><span>até</span><input type="date" value="${esc(FD.ate)}" onchange="app.setF('ate',this.value)"></label>
@@ -347,12 +448,12 @@
       </div>
 
       <div class="cards">
-        <div class="card"><div class="lbl">Atividades no filtro</div><div class="val">${ativ.length}</div><div class="note">de ${todas.length} no projeto</div></div>
-        <div class="card"><div class="lbl">Avanço médio</div><div class="val">${pond.toFixed(0)}%</div><div class="note">${res.c} concluídas · ${res.e} em andamento</div></div>
-        <div class="card"><div class="lbl">Atrasadas</div><div class="val ${res.atr ? "red" : ""}">${res.atr}</div><div class="note">${atrasoMedio ? atrasoMedio + " dias úteis em média" : "nenhuma"}</div></div>
-        <div class="card"><div class="lbl">Prontidão p/ 26-10</div><div class="val ${prontidao < 50 ? "red" : ""}">${prontidao.toFixed(0)}%</div><div class="note">${concNoTeste} de ${noTeste.length} com previsão até lá</div></div>
-        <div class="card"><div class="lbl">Aderência ao prazo</div><div class="val">${aderencia === null ? "—" : aderencia.toFixed(0) + "%"}</div><div class="note">${comConc.length ? noPrazo + " de " + comConc.length + " entregues no prazo" : "sem entregas medidas"}</div></div>
-        <div class="card"><div class="lbl">Sem data</div><div class="val ${res.sd ? "red" : ""}">${res.sd}</div><div class="note">${semDono.length} sem consultor definido</div></div>
+        ${kpi("Atividades no filtro", ativ.length, `de ${todas.length} no projeto`, "", { }, "Mostra todas as atividades do projeto|Clique para limpar os filtros")}
+        ${kpi("Avanço médio", pond.toFixed(0) + "%", `${res.c} concluídas · ${res.e} em andamento`, "", { status: "Em andamento" }, "Média simples do % de conclusão|Clique para ver só as atividades em andamento")}
+        ${kpi("Atrasadas", res.atr, atrasoMedio ? atrasoMedio + " dias úteis em média" : "nenhuma", res.atr ? "red" : "", { sit: "Atrasada" }, "Previsão vencida e status diferente de Concluído|Clique para ver só as atrasadas")}
+        ${kpi("Prontidão p/ " + fmtD(teste).slice(0, 5), prontidao.toFixed(0) + "%", `${concNoTeste} de ${noTeste.length} com previsão até lá`, prontidao < 50 ? "red" : "", { ate: teste }, "Concluídas entre as que vencem até o teste integrado|Clique para filtrar o período até " + fmtD(teste))}
+        ${kpi("Aderência ao prazo", aderencia === null ? "—" : aderencia.toFixed(0) + "%", comConc.length ? noPrazo + " de " + comConc.length + " entregues no prazo" : "sem entregas medidas", "", { status: "Concluído" }, "Concluídas dentro da previsão ÷ concluídas com previsão|Clique para ver as concluídas")}
+        ${kpi("Sem data", res.sd, `${semDono.length} sem consultor definido`, res.sd ? "red" : "", { sit: "Sem data" }, "Sem previsão cadastrada|Clique para ver só essas atividades")}
       </div>
 
       <div class="grid2">
@@ -374,27 +475,27 @@
       <div class="grid2">
         <div class="section"><h3>Atrasos <span class="tag">${atrasoTop.length} atividades</span></h3>
           ${atrasoTop.length ? `<div class="tbl-wrap"><table><tr><th>Cód.</th><th>Atividade</th><th>Consultor</th><th>Previsão</th><th>Atraso</th></tr>
-          ${atrasoTop.slice(0, 15).map((a) => `<tr><td class="c codes">${esc(a.codigo)}</td><td>${esc(a.atividade).slice(0, 70)}</td><td>${esc(a.consultor)}</td><td class="c">${fmtD(a.previsao)}</td><td class="c"><span class="pill bad">${Math.abs(diasUteis(r, a.previsao) || 0)} d.ú.</span></td></tr>`).join("")}</table></div>` : '<div class="help">Nenhuma atividade atrasada no filtro.</div>'}
+          ${atrasoTop.slice(0, 15).map((a) => `<tr class="rowlink" data-click="1" role="button" tabindex="0" onclick="app.abrirAtiv(${esc(JSON.stringify(a.codigo))},${esc(JSON.stringify(a.origem))})" data-tip="${esc("Clique para ver os detalhes de " + a.codigo)}"><td class="c codes">${esc(a.codigo)}</td><td>${esc(a.atividade).slice(0, 70)}</td><td>${esc(a.consultor)}</td><td class="c">${fmtD(a.previsao)}</td><td class="c"><span class="pill bad">${Math.abs(diasUteis(r, a.previsao) || 0)} d.ú.</span></td></tr>`).join("")}</table></div>` : '<div class="help">Nenhuma atividade atrasada no filtro.</div>'}
         </div>
         <div class="section"><h3>Próximos 5 dias úteis <span class="tag">${prox.length} atividades</span></h3>
           ${prox.length ? `<div class="tbl-wrap"><table><tr><th>Cód.</th><th>Atividade</th><th>Consultor</th><th>Previsão</th><th>Faltam</th></tr>
-          ${prox.slice(0, 15).map((a) => `<tr><td class="c codes">${esc(a.codigo)}</td><td>${esc(a.atividade).slice(0, 70)}</td><td>${esc(a.consultor)}</td><td class="c">${fmtD(a.previsao)}</td><td class="c"><span class="pill ${diasUteis(r, a.previsao) <= 2 ? "warn" : "info"}">${diasUteis(r, a.previsao)} d.ú.</span></td></tr>`).join("")}</table></div>` : '<div class="help">Nada vencendo nos próximos 5 dias úteis.</div>'}
+          ${prox.slice(0, 15).map((a) => `<tr class="rowlink" data-click="1" role="button" tabindex="0" onclick="app.abrirAtiv(${esc(JSON.stringify(a.codigo))},${esc(JSON.stringify(a.origem))})" data-tip="${esc("Clique para ver os detalhes de " + a.codigo)}"><td class="c codes">${esc(a.codigo)}</td><td>${esc(a.atividade).slice(0, 70)}</td><td>${esc(a.consultor)}</td><td class="c">${fmtD(a.previsao)}</td><td class="c"><span class="pill ${diasUteis(r, a.previsao) <= 2 ? "warn" : "info"}">${diasUteis(r, a.previsao)} d.ú.</span></td></tr>`).join("")}</table></div>` : '<div class="help">Nada vencendo nos próximos 5 dias úteis.</div>'}
         </div>
       </div>
 
       <div class="grid2">
         <div class="section"><h3>Pontos de atenção em aberto <span class="tag">${pts.length}</span></h3>
           <div class="tbl-wrap"><table><tr><th>Tipo</th><th>Total</th><th>Vencidos</th><th>No boletim</th></tr>
-          ${TIPOS.map((t) => { const l = pts.filter((p) => p.tipo === t); return `<tr><td>${t}</td><td class="c">${l.length}</td><td class="c">${l.filter((p) => p.prazo && p.prazo < r).length ? `<span class="pill bad">${l.filter((p) => p.prazo && p.prazo < r).length}</span>` : "-"}</td><td class="c">${l.filter((p) => p.no_boletim).length}</td></tr>`; }).join("")}
+          ${TIPOS.map((t) => { const l = pts.filter((p) => p.tipo === t); return `<tr class="rowlink" data-click="1" role="button" tabindex="0" onclick="app.irPontos(${esc(JSON.stringify(t))})" data-tip="${esc("Abrir a aba Pontos de atenção filtrada por " + t)}"><td>${t}</td><td class="c">${l.length}</td><td class="c">${l.filter((p) => p.prazo && p.prazo < r).length ? `<span class="pill bad">${l.filter((p) => p.prazo && p.prazo < r).length}</span>` : "-"}</td><td class="c">${l.filter((p) => p.no_boletim).length}</td></tr>`; }).join("")}
           <tr class="group"><td>Total</td><td class="c">${pts.length}</td><td class="c">${pts.filter((p) => p.prazo && p.prazo < r).length}</td><td class="c">${pts.filter((p) => p.no_boletim).length}</td></tr></table></div>
         </div>
         <div class="section"><h3>Riscos de execução</h3>
           <div class="tbl-wrap"><table><tr><th>Indicador</th><th>Qtd.</th><th>Leitura</th></tr>
-            <tr><td>Atividades sem consultor definido</td><td class="c">${semDono.length}</td><td class="muted">ninguém executa até alguém assumir</td></tr>
-            <tr><td>Em andamento sem atualização há +5 d.ú.</td><td class="c">${paradas.length}</td><td class="muted">possível parada silenciosa</td></tr>
-            <tr><td>Bloqueadas</td><td class="c">${ativ.filter((a) => a.status === "Bloqueado").length}</td><td class="muted">dependem de terceiros</td></tr>
-            <tr><td>Dependentes de TOTVS</td><td class="c">${ativ.filter((a) => a.lado === "TOTVS").length}</td><td class="muted">fora do controle da LT</td></tr>
-            <tr><td>Passos de teste reprovados / bloqueados</td><td class="c">${rot.filter((x) => ["Reprovado", "Bloqueado"].includes(x.resultado)).length}</td><td class="muted">roteiro preliminar</td></tr>
+            ${risco("Atividades sem consultor definido", semDono.length, "ninguém executa até alguém assumir", semDono)}
+            ${risco("Em andamento sem atualização há +5 d.ú.", paradas.length, "possível parada silenciosa", paradas)}
+            ${risco("Bloqueadas", ativ.filter((a) => a.status === "Bloqueado").length, "dependem de terceiros", ativ.filter((a) => a.status === "Bloqueado"))}
+            ${risco("Dependentes de TOTVS", ativ.filter((a) => a.lado === "TOTVS").length, "fora do controle da LT", ativ.filter((a) => a.lado === "TOTVS"))}
+            <tr onclick="app.show('roteiro')" class="rowlink" data-click="1" role="button" tabindex="0" data-tip="Abrir o roteiro de testes"><td>Passos de teste reprovados / bloqueados</td><td class="c">${rot.filter((x) => ["Reprovado", "Bloqueado"].includes(x.resultado)).length}</td><td class="muted">roteiro preliminar</td></tr>
           </table></div>
         </div>
       </div>`;
@@ -500,7 +601,7 @@
     for (const a of vis) {
       if (a.bloco !== bloco) { bloco = a.bloco; const rb = resumoFrente(list.filter((x) => x.bloco === bloco)); html += `<tr class="group"><td colspan="17">${esc(bloco)} <span class="tag" style="font-weight:normal;color:var(--muted)">· ${rb.n} atividades · ${rb.pct.toFixed(0)}% · ${rb.atr} atrasadas</span></td></tr>`; }
       const [s, c] = situacao(a); const du = a.previsao && a.status !== "Concluído" ? diasUteis(ref(), a.previsao) : "";
-      html += `<tr class="edit"><td class="c codes">${esc(a.codigo)}</td><td>${esc(a.atividade)}</td><td class="c">${inp("atividades", a, "lado", "select", LADOS)}</td><td>${inp("atividades", a, "consultor", "text")}</td><td>${inp("atividades", a, "key_user", "text")}</td><td>${inp("atividades", a, "status", "select", STATUS)}</td><td class="num">${inp("atividades", a, "pct", "pct")}</td><td class="c">${inp("atividades", a, "inicio", "date")}</td><td class="c">${inp("atividades", a, "previsao", "date")}</td><td class="c">${inp("atividades", a, "conclusao", "date")}</td><td class="c" style="color:${du < 0 ? "var(--red)" : "inherit"}">${du}</td><td class="c"><span class="pill ${c}">${s}</span></td><td class="muted">${esc(a.pre_requisito)}</td><td class="codes">${esc(a.precedentes)}</td><td class="codes">${esc(dependentes(list, a.codigo))}</td><td>${inp("atividades", a, "ponto_atencao", "area")}</td><td>${inp("atividades", a, "obs", "area")}</td></tr>`;
+      html += `<tr class="edit"><td class="c codes"><button class="dbtn" onclick="app.abrirAtiv(${esc(JSON.stringify(a.codigo))},${esc(JSON.stringify(a.origem))})" data-tip="${esc("Ver todos os detalhes de " + a.codigo)}" aria-label="Detalhes de ${esc(a.codigo)}">${esc(a.codigo)}</button></td><td>${esc(a.atividade)}</td><td class="c">${inp("atividades", a, "lado", "select", LADOS)}</td><td>${inp("atividades", a, "consultor", "text")}</td><td>${inp("atividades", a, "key_user", "text")}</td><td>${inp("atividades", a, "status", "select", STATUS)}</td><td class="num">${inp("atividades", a, "pct", "pct")}</td><td class="c">${inp("atividades", a, "inicio", "date")}</td><td class="c">${inp("atividades", a, "previsao", "date")}</td><td class="c">${inp("atividades", a, "conclusao", "date")}</td><td class="c" style="color:${du < 0 ? "var(--red)" : "inherit"}">${du}</td><td class="c"><span class="pill ${c}">${s}</span></td><td class="muted">${esc(a.pre_requisito)}</td><td class="codes">${esc(a.precedentes)}</td><td class="codes">${esc(dependentes(list, a.codigo))}</td><td>${inp("atividades", a, "ponto_atencao", "area")}</td><td>${inp("atividades", a, "obs", "area")}</td></tr>`;
     }
     html += "</table></div>";
     if (origem === "portal") html += vPortalPerfis();
@@ -670,7 +771,7 @@
   // ---------- util ----------
   function toast(msg, err) { const t = document.createElement("div"); t.className = "toast" + (err ? " err" : ""); t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), err ? 6000 : 2500); }
 
-  window.app = { login, logout, show, mark, saveAll, discard, setRef, salvarTexto, filtro, novoPonto, criarUsuario, setPerfil, trocarSenha, exportar, toast, menu, collapse, setF, limparF, periodo };
+  window.app = { login, logout, show, mark, saveAll, discard, setRef, salvarTexto, filtro, novoPonto, criarUsuario, setPerfil, trocarSenha, exportar, toast, menu, collapse, setF, limparF, periodo, setMulti, abrirAtiv, fecharDet, verLista, irPontos };
   window.addEventListener("hashchange", () => { if (S.user && location.hash.replace("#", "") !== S.view) show(location.hash.replace("#", "") || "boletim"); });
   const _show = show; window.app.show = (v) => { _show(v); if (v === "ajuda") carregarLog(); };
   boot();
