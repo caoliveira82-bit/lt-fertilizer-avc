@@ -234,3 +234,60 @@ td.dirty{box-shadow:inset 3px 0 0 var(--mint)}
   .donut text{fill:#0A1024}
   .donut text+text{fill:#5B6475}
 }
+
+/* ---------- interação: hover, foco, dica flutuante e painel de detalhe ---------- */
+.clickable{cursor:pointer;transition:transform .12s ease,border-color .12s ease,background .12s ease}
+.clickable:hover{border-color:var(--mint)}
+.clickable:focus-visible,[data-click]:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+.card.clickable:hover{transform:translateY(-2px);background:var(--slate2)}
+.crow.clickable{cursor:pointer;border-radius:6px;padding:2px 4px;margin:0 -4px}
+.crow.clickable:hover{background:rgba(30,214,158,.08)}
+.crow.clickable:hover .clbl{color:var(--white)}
+.crow.clickable:hover .cbar{box-shadow:0 0 0 1px var(--mint) inset}
+.donut .slice{cursor:pointer;transition:stroke-width .12s ease,opacity .12s ease}
+.donut:hover .slice{opacity:.55}
+.donut .slice:hover{stroke-width:7.5;opacity:1}
+.svgchart .pt{cursor:default;transition:r .12s ease}
+.svgchart .pt:hover{r:2.6}
+.legend span.clickable{cursor:pointer;border-radius:999px;padding:1px 6px;margin:-1px -6px}
+.legend span.clickable:hover{background:rgba(127,178,240,.14);color:var(--white)}
+tr.rowlink{cursor:pointer}
+tr.rowlink:hover>td{background:rgba(127,178,240,.09)}
+tr.rowlink:hover>td:first-child{box-shadow:inset 3px 0 0 var(--mint)}
+.fativos{display:flex;gap:7px;flex-wrap:wrap;margin:9px 0 2px}
+.chip.on{border-color:var(--mint);color:var(--white);background:rgba(30,214,158,.1)}
+.chip.mini{padding:3px 9px;font-size:11.5px;background:var(--navy);border:1px solid var(--slate);color:var(--blue);border-radius:999px;cursor:pointer;font-family:var(--mono)}
+.chip.mini:hover{border-color:var(--mint);color:var(--white)}
+.dbtn{background:none;border:0;color:var(--blue);font-family:var(--mono);font-size:11.5px;cursor:pointer;padding:2px 4px;border-radius:5px}
+.dbtn:hover{background:rgba(127,178,240,.16);color:var(--white)}
+.tip{position:fixed;z-index:120;max-width:280px;background:#06090F;border:1px solid var(--slate);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.45;color:var(--white);box-shadow:0 10px 28px rgba(0,0,0,.55);opacity:0;visibility:hidden;transition:opacity .1s ease;pointer-events:none}
+.tip.on{opacity:1;visibility:visible}
+.det-wrap{position:fixed;inset:0;z-index:130;background:rgba(4,7,14,.62);display:flex;justify-content:flex-end;opacity:0;visibility:hidden;transition:opacity .18s ease}
+.det-wrap.on{opacity:1;visibility:visible}
+.det{width:min(520px,100%);height:100%;background:var(--side);border-left:1px solid var(--slate);display:flex;flex-direction:column;transform:translateX(18px);transition:transform .18s ease}
+.det-wrap.on .det{transform:none}
+.det>header{display:flex;align-items:flex-start;gap:12px;padding:16px 18px;border-bottom:1px solid var(--slate)}
+.det>header h3{margin:0;font-size:14.5px;color:var(--white);line-height:1.35}
+.dsub{font-size:11.5px;color:var(--mint);margin-top:3px;letter-spacing:.03em}
+.iconx{margin-left:auto;background:none;border:1px solid var(--slate);color:var(--muted);border-radius:8px;width:30px;height:30px;cursor:pointer;flex:none}
+.iconx:hover{color:var(--white);border-color:var(--red)}
+.dbody{padding:14px 18px 26px;overflow:auto}
+.dhero{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.dbar{flex:1;height:9px;border-radius:5px;background:var(--navy);overflow:hidden}
+.dbar i{display:block;height:100%;background:linear-gradient(90deg,#1ED69E,#7FB2F0)}
+.dhero b{font-family:var(--mono);font-size:13px;color:var(--white)}
+.drow{display:grid;grid-template-columns:minmax(110px,34%) 1fr;gap:10px;padding:7px 0;border-bottom:1px solid rgba(42,49,66,.55);font-size:12.5px}
+.dk{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding-top:2px}
+.dv{color:var(--white);line-height:1.5;word-break:break-word}
+.dsec{margin:16px 0 7px;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--amber)}
+.dnote{background:var(--slate2);border:1px solid var(--slate);border-radius:8px;padding:9px 11px;font-size:12px;color:var(--muted);margin-bottom:7px}
+.dnote b{color:var(--white)}
+.dacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
+@media (max-width:760px){
+  .det{width:100%;border-left:0}
+  .drow{grid-template-columns:1fr;gap:2px}
+  .tip{display:none}
+}
+@media print{.tip,.det-wrap,.dbtn{display:none!important}}
+#main table tr:not(.group):hover>td{background:rgba(255,255,255,.03)}
+#main table tr.rowlink:hover>td{background:rgba(127,178,240,.09)}
