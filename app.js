@@ -97,7 +97,10 @@
     $("nav").innerHTML = VIEWS.filter(([k]) => k !== "usuarios" || isAdmin()).map(([k, l]) => `<button data-v="${k}" onclick="app.show('${k}')"><svg viewBox="0 0 24 24">${ICONS[k] || ""}</svg><span>${l}</span></button>`).join("");
     try { if (localStorage.getItem("lt-menu") === "collapsed") document.body.classList.add("collapsed"); } catch (e) {}
   }
-  function menu(open) { document.body.classList.toggle("menu-open", open === undefined ? !document.body.classList.contains("menu-open") : open); }
+  function menu(open) {
+    if (window.matchMedia("(min-width:761px)").matches) { collapse(); return; }
+    document.body.classList.toggle("menu-open", open === undefined ? !document.body.classList.contains("menu-open") : open);
+  }
   function collapse() { document.body.classList.toggle("collapsed"); try { localStorage.setItem("lt-menu", document.body.classList.contains("collapsed") ? "collapsed" : "open"); } catch (e) {} }
   function show(v) {
     if (Object.keys(S.dirty).length && !confirm("Há alterações não salvas. Descartar?")) return;
