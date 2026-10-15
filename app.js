@@ -85,16 +85,29 @@
   }
 
   // ---------- navegação ----------
+  const ICONS = {
+    boletim: '<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/>', template: '<path d="M3 5h18M3 12h18M3 19h18"/><path d="M7 5v14"/>',
+    portal: '<path d="M3 7h13v10H3z"/><path d="M16 10h3l2 3v4h-5"/><circle cx="7" cy="18" r="1.5"/><circle cx="18" cy="18" r="1.5"/>',
+    custom: '<path d="M12 3l2.5 5 5.5.8-4 3.9.9 5.5L12 15.6 7.1 18.2l.9-5.5-4-3.9 5.5-.8z"/>', roteiro: '<path d="M5 4h14v16H5z"/><path d="M9 9l2 2 4-4M9 15l2 2 4-4"/>',
+    pontos: '<path d="M12 3l10 18H2z"/><path d="M12 10v4M12 17h.01"/>', equipe: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0113 0"/><circle cx="17" cy="9" r="2.5"/><path d="M15 20h6.5a5 5 0 00-5-5"/>',
+    usuarios: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/><path d="M19 3l2 2-2 2"/>', ajuda: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 015 0c0 1.5-2.5 2-2.5 3.5M12 17h.01"/>'
+  };
   function renderNav() {
-    $("nav").innerHTML = VIEWS.filter(([k]) => k !== "usuarios" || isAdmin()).map(([k, l]) => `<button data-v="${k}" onclick="app.show('${k}')">${l}</button>`).join("");
+    $("nav").innerHTML = VIEWS.filter(([k]) => k !== "usuarios" || isAdmin()).map(([k, l]) => `<button data-v="${k}" onclick="app.show('${k}')"><svg viewBox="0 0 24 24">${ICONS[k] || ""}</svg><span>${l}</span></button>`).join("");
+    try { if (localStorage.getItem("lt-menu") === "collapsed") document.body.classList.add("collapsed"); } catch (e) {}
   }
+  function menu(open) { document.body.classList.toggle("menu-open", open === undefined ? !document.body.classList.contains("menu-open") : open); }
+  function collapse() { document.body.classList.toggle("collapsed"); try { localStorage.setItem("lt-menu", document.body.classList.contains("collapsed") ? "collapsed" : "open"); } catch (e) {} }
   function show(v) {
     if (Object.keys(S.dirty).length && !confirm("Há alterações não salvas. Descartar?")) return;
     S.dirty = {}; updateSavebar();
     S.view = v; location.hash = v;
     document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("active", b.dataset.v === v));
+    const vt = $("view-title"); if (vt) vt.textContent = (VIEWS.find(([k]) => k === v) || [])[1] || "";
+    menu(false);
     const r = { boletim: vBoletim, template: () => vAtividades("template"), portal: () => vAtividades("portal"), custom: () => vAtividades("custom"), roteiro: vRoteiro, pontos: vPontos, equipe: vEquipe, usuarios: vUsuarios, ajuda: vAjuda }[v] || vBoletim;
     $("main").innerHTML = r();
+    labelCells();
     window.scrollTo(0, 0);
   }
 
@@ -251,7 +264,15 @@
     }
     return html + "</table></div>";
   }
-  function filtro(v) { S.filtro = v; const el = $("main"); const y = window.scrollY; el.innerHTML = ({ template: () => vAtividades("template"), portal: () => vAtividades("portal"), custom: () => vAtividades("custom"), roteiro: vRoteiro, pontos: vPontos })[S.view](); window.scrollTo(0, y); const i = el.querySelector("input[type=search]"); i.focus(); i.setSelectionRange(v.length, v.length); }
+  function labelCells() {
+    document.querySelectorAll("#main table").forEach((t) => {
+      const ths = [...t.querySelectorAll("tr:first-child th")].map((th) => th.textContent.trim());
+      if (!ths.length) return;
+      if (t.querySelector("tr.edit") || t.closest(".section")?.querySelector("h3")?.textContent.includes("Avanço")) t.classList.add("cardify");
+      t.querySelectorAll("tr:not(.group)").forEach((tr) => [...tr.children].forEach((td, i) => { if (td.tagName === "TD" && ths[i]) td.setAttribute("data-l", ths[i]); }));
+    });
+  }
+  function filtro(v) { S.filtro = v; const el = $("main"); const y = window.scrollY; el.innerHTML = ({ template: () => vAtividades("template"), portal: () => vAtividades("portal"), custom: () => vAtividades("custom"), roteiro: vRoteiro, pontos: vPontos })[S.view](); labelCells(); window.scrollTo(0, y); const i = el.querySelector("input[type=search]"); i.focus(); i.setSelectionRange(v.length, v.length); }
 
   // ---------- Roteiro ----------
   function vRoteiro() {
@@ -395,7 +416,7 @@
   // ---------- util ----------
   function toast(msg, err) { const t = document.createElement("div"); t.className = "toast" + (err ? " err" : ""); t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), err ? 6000 : 2500); }
 
-  window.app = { login, logout, show, mark, saveAll, discard, setRef, salvarTexto, filtro, novoPonto, criarUsuario, setPerfil, trocarSenha, exportar, toast };
+  window.app = { login, logout, show, mark, saveAll, discard, setRef, salvarTexto, filtro, novoPonto, criarUsuario, setPerfil, trocarSenha, exportar, toast, menu, collapse };
   window.addEventListener("hashchange", () => { if (S.user && location.hash.replace("#", "") !== S.view) show(location.hash.replace("#", "") || "boletim"); });
   const _show = show; window.app.show = (v) => { _show(v); if (v === "ajuda") carregarLog(); };
   boot();
