@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Acompanhamento Fertilizer AVC — LT Fácil</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231ED69E'/%3E%3Ctext x='16' y='21' font-family='Arial' font-weight='900' font-size='14' text-anchor='middle' fill='%230A1024'%3ELT%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+
+<!-- ===================== LOGIN ===================== -->
+<div id="login" class="login-wrap">
+  <form class="login" onsubmit="return app.login(event)">
+    <div class="brand" style="color:var(--navy);margin-bottom:14px"><span class="mark">LT</span><span>LT Fácil<small>Acompanhamento de projeto</small></span></div>
+    <h1>Fertilizer AVC</h1>
+    <p>Painel dos consultores. Entre com o e-mail e a senha fornecidos pela LT.</p>
+    <label>E-mail</label><input id="l-email" type="email" autocomplete="username" required>
+    <label>Senha</label><input id="l-pass" type="password" autocomplete="current-password" required>
+    <button class="btn" type="submit">Entrar</button>
+    <div class="err" id="l-err"></div>
+    <div id="l-setup" class="setup hidden">Configuração pendente: edite <b>config.js</b> com a URL e a chave anônima do projeto Supabase (veja o README).</div>
+  </form>
+</div>
+
+<!-- ===================== APP ===================== -->
+<div id="app" class="hidden">
+  <header class="topbar">
+    <div class="brand"><span class="mark">LT</span><span>LT Fácil<small>Fertilizer AVC · acompanhamento</small></span></div>
+    <nav id="nav"></nav>
+    <div class="spacer"></div>
+    <div class="user"><b id="u-nome"></b><span id="u-papel"></span></div>
+    <button class="btn ghost small" onclick="app.logout()">Sair</button>
+  </header>
+  <main id="main"></main>
+  <div id="savebar" class="savebar hidden">
+    <span id="dirty-count"></span>
+    <button class="btn" onclick="app.saveAll()">Salvar alterações</button>
+    <button class="btn ghost" onclick="app.discard()">Descartar</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
