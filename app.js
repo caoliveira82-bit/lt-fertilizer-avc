@@ -11,7 +11,7 @@
   const PSTATUS = ["Aberto", "Em tratamento", "Resolvido"];
   const LADOS = ["LT Fácil", "TOTVS", "AVC"];
   const VIEWS = [
-    ["boletim", "Boletim"], ["template", "Template"], ["portal", "Portal"], ["custom", "Customizações"],
+    ["boletim", "Boletim"], ["dashboard", "Dashboard"], ["template", "Template"], ["portal", "Portal"], ["custom", "Customizações"],
     ["roteiro", "Roteiro de testes"], ["pontos", "Pontos de atenção"], ["equipe", "Equipe"], ["usuarios", "Usuários"], ["ajuda", "Ajuda"]
   ];
 
@@ -86,7 +86,8 @@
 
   // ---------- navegação ----------
   const ICONS = {
-    boletim: '<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/>', template: '<path d="M3 5h18M3 12h18M3 19h18"/><path d="M7 5v14"/>',
+    boletim: '<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/>',
+    dashboard: '<path d="M4 20V9M9.5 20V4M15 20v-7M20.5 20v-11"/>', template: '<path d="M3 5h18M3 12h18M3 19h18"/><path d="M7 5v14"/>',
     portal: '<path d="M3 7h13v10H3z"/><path d="M16 10h3l2 3v4h-5"/><circle cx="7" cy="18" r="1.5"/><circle cx="18" cy="18" r="1.5"/>',
     custom: '<path d="M12 3l2.5 5 5.5.8-4 3.9.9 5.5L12 15.6 7.1 18.2l.9-5.5-4-3.9 5.5-.8z"/>', roteiro: '<path d="M5 4h14v16H5z"/><path d="M9 9l2 2 4-4M9 15l2 2 4-4"/>',
     pontos: '<path d="M12 3l10 18H2z"/><path d="M12 10v4M12 17h.01"/>', equipe: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0113 0"/><circle cx="17" cy="9" r="2.5"/><path d="M15 20h6.5a5 5 0 00-5-5"/>',
@@ -105,7 +106,7 @@
     document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("active", b.dataset.v === v));
     const vt = $("view-title"); if (vt) vt.textContent = (VIEWS.find(([k]) => k === v) || [])[1] || "";
     menu(false);
-    const r = { boletim: vBoletim, template: () => vAtividades("template"), portal: () => vAtividades("portal"), custom: () => vAtividades("custom"), roteiro: vRoteiro, pontos: vPontos, equipe: vEquipe, usuarios: vUsuarios, ajuda: vAjuda }[v] || vBoletim;
+    const r = { boletim: vBoletim, dashboard: vDashboard, template: () => vAtividades("template"), portal: () => vAtividades("portal"), custom: () => vAtividades("custom"), roteiro: vRoteiro, pontos: vPontos, equipe: vEquipe, usuarios: vUsuarios, ajuda: vAjuda }[v] || vBoletim;
     $("main").innerHTML = r();
     labelCells();
     window.scrollTo(0, 0);
@@ -159,6 +160,242 @@
     S.dirty = {}; updateSavebar(); toast(`${logs.length} campo(s) salvos.`); show(S.view);
   }
   function discard() { S.dirty = {}; updateSavebar(); show(S.view); }
+
+  // =====================================================================
+  // DASHBOARD — análise com filtros (período, frente, consultor, área, lado, status)
+  // =====================================================================
+  const FD = { de: "", ate: "", origem: "", bloco: "", consultor: "", keyuser: "", lado: "", status: "", sit: "" };
+  const uniq = (arr) => [...new Set(arr.filter((x) => x && String(x).trim()))].sort((a, b) => String(a).localeCompare(String(b), "pt"));
+  const pessoas = (v) => String(v || "").split(/[;/]/).map((s) => s.trim()).filter(Boolean);
+  function semana(d) { const dt = new Date(d + "T00:00:00"); const wd = (dt.getDay() + 6) % 7; dt.setDate(dt.getDate() - wd); return dt.toISOString().slice(0, 10); }
+  function addDias(d, n) { const dt = new Date(d + "T00:00:00"); dt.setDate(dt.getDate() + n); return dt.toISOString().slice(0, 10); }
+  const ORIGEM_L = { template: "Template", portal: "Portal de Cargas", custom: "Customizações" };
+
+  function filtrarAtiv() {
+    return S.data.atividades.filter((a) => {
+      if (FD.origem && a.origem !== FD.origem) return false;
+      if (FD.bloco && a.bloco !== FD.bloco) return false;
+      if (FD.lado && a.lado !== FD.lado) return false;
+      if (FD.status && a.status !== FD.status) return false;
+      if (FD.sit && situacao(a)[0] !== FD.sit) return false;
+      if (FD.consultor && !pessoas(a.consultor).includes(FD.consultor)) return false;
+      if (FD.keyuser && !pessoas(a.key_user).includes(FD.keyuser)) return false;
+      if (FD.de || FD.ate) {
+        const p = a.previsao, i = a.inicio;
+        if (!p && !i) return false;
+        if (FD.de && (p || i) < FD.de) return false;
+        if (FD.ate && (i || p) > FD.ate) return false;
+      }
+      return true;
+    });
+  }
+  function setF(k, v) { FD[k] = v; if (k === "origem") FD.bloco = ""; redrawDash(); }
+  function limparF() { Object.keys(FD).forEach((k) => (FD[k] = "")); redrawDash(); }
+  function periodo(p) {
+    const r = ref();
+    if (p === "sem") { FD.de = semana(r); FD.ate = addDias(semana(r), 6); }
+    else if (p === "prox") { FD.de = r; FD.ate = addDias(r, 14); }
+    else if (p === "ate-teste") { FD.de = ""; FD.ate = param("inicio_testes"); }
+    else if (p === "venc") { FD.de = ""; FD.ate = addDias(r, -1); }
+    else { FD.de = ""; FD.ate = ""; }
+    redrawDash();
+  }
+  function redrawDash() { const y = window.scrollY; $("main").innerHTML = vDashboard(); labelCells(); window.scrollTo(0, y); }
+
+  // --- gráficos em SVG puro ---
+  const CORES = { "Concluído": "#1ED69E", "Em andamento": "#7FB2F0", "Não iniciado": "#4A5165", "Bloqueado": "#E05C5C" };
+  function barrasEmpilhadas(linhas, titulo) {
+    // linhas: [{ label, partes:[{v,cor}], total, extra }]
+    const max = Math.max(1, ...linhas.map((l) => l.total));
+    return `<div class="chart">${linhas.map((l) => {
+      let acc = 0;
+      return `<div class="crow"><div class="clbl" title="${esc(l.label)}">${esc(l.label)}</div>
+        <div class="cbar"><svg viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="${esc(l.label)}: ${l.total}">
+        ${l.partes.map((p) => { const w = (p.v / max) * 100; const x = acc; acc += w; return p.v ? `<rect x="${x.toFixed(2)}" y="0" width="${w.toFixed(2)}" height="10" fill="${p.cor}"><title>${esc(p.nome)}: ${p.v}</title></rect>` : ""; }).join("")}
+        </svg></div><div class="cval">${l.extra ?? l.total}</div></div>`;
+    }).join("")}</div>`;
+  }
+  function curvaS(ativ) {
+    const comPrev = ativ.filter((a) => a.previsao);
+    if (!comPrev.length) return `<div class="help">Sem datas de previsão no filtro atual.</div>`;
+    const sems = uniq(comPrev.map((a) => semana(a.previsao)));
+    const total = ativ.length;
+    let accP = 0, accR = 0;
+    const pts = sems.map((s) => {
+      accP += comPrev.filter((a) => semana(a.previsao) === s).length;
+      accR += ativ.filter((a) => a.conclusao && semana(a.conclusao) === s).length;
+      return { s, p: accP, r: accR };
+    });
+    const W = 100, H = 46, n = Math.max(1, pts.length - 1), maxY = Math.max(total, accP, 1);
+    const X = (i) => (n ? (i / n) * W : 0), Y = (v) => H - (v / maxY) * (H - 6) - 3;
+    const hoje = ref();
+    const linha = (key, cor, dash) => `<polyline fill="none" stroke="${cor}" stroke-width="1.1" ${dash ? 'stroke-dasharray="2 1.5"' : ""} points="${pts.map((p, i) => `${X(i).toFixed(2)},${Y(p[key]).toFixed(2)}`).join(" ")}"/>`;
+    const idxHoje = pts.findIndex((p) => p.s >= semana(hoje));
+    return `<svg class="svgchart" viewBox="0 0 100 ${H}" preserveAspectRatio="none" role="img" aria-label="Curva S: previsto x concluído">
+      <line x1="0" y1="${Y(0)}" x2="100" y2="${Y(0)}" stroke="#2A3142" stroke-width=".5"/>
+      ${idxHoje >= 0 ? `<line x1="${X(idxHoje).toFixed(2)}" y1="0" x2="${X(idxHoje).toFixed(2)}" y2="${H}" stroke="#FFC000" stroke-width=".4" stroke-dasharray="1.5 1.5"/>` : ""}
+      ${linha("p", "#9AA3B8", true)}${linha("r", "#1ED69E", false)}
+      ${pts.map((p, i) => `<circle cx="${X(i).toFixed(2)}" cy="${Y(p.r).toFixed(2)}" r="0.9" fill="#1ED69E"><title>${fmtD(p.s)}: ${p.r} concluídas de ${p.p} previstas</title></circle>`).join("")}
+    </svg>
+    <div class="legend"><span><i style="background:#9AA3B8"></i>Previsto acumulado</span><span><i style="background:#1ED69E"></i>Concluído acumulado</span><span><i style="background:#FFC000"></i>Semana atual</span></div>
+    <div class="xaxis">${pts.map((p, i) => (i === 0 || i === pts.length - 1 || i === Math.floor(pts.length / 2) ? `<span style="left:${X(i).toFixed(1)}%">${fmtD(p.s).slice(0, 5)}</span>` : "")).join("")}</div>`;
+  }
+  function donut(dados) {
+    const tot = dados.reduce((s, d) => s + d.v, 0) || 1;
+    let acc = 0, R = 15.9155;
+    return `<div class="donut-wrap"><svg viewBox="0 0 42 42" class="donut" role="img" aria-label="Distribuição por situação">
+      <circle cx="21" cy="21" r="${R}" fill="none" stroke="#1B2135" stroke-width="6"/>
+      ${dados.filter((d) => d.v).map((d) => { const pc = (d.v / tot) * 100; const el = `<circle cx="21" cy="21" r="${R}" fill="none" stroke="${d.cor}" stroke-width="6" stroke-dasharray="${pc.toFixed(2)} ${(100 - pc).toFixed(2)}" stroke-dashoffset="${(25 - acc).toFixed(2)}"><title>${esc(d.nome)}: ${d.v} (${pc.toFixed(0)}%)</title></circle>`; acc += pc; return el; }).join("")}
+      <text x="21" y="20.5" text-anchor="middle" font-size="7" fill="#fff" font-weight="bold" font-family="Arial">${tot}</text>
+      <text x="21" y="25.5" text-anchor="middle" font-size="3" fill="#9AA3B8" font-family="Arial">atividades</text>
+    </svg><div class="legend col">${dados.filter((d) => d.v).map((d) => `<span><i style="background:${d.cor}"></i>${esc(d.nome)} <b>${d.v}</b></span>`).join("")}</div></div>`;
+  }
+
+  function vDashboard() {
+    const todas = S.data.atividades, ativ = filtrarAtiv();
+    const r = ref(), teste = param("inicio_testes");
+    const duTeste = Math.max(0, (diasUteis(r, teste) || 1) - 1);
+    const res = resumoFrente(ativ);
+    const atrasadas = ativ.filter((a) => situacao(a)[0] === "Atrasada");
+    const atrasoMedio = atrasadas.length ? Math.round(atrasadas.reduce((s, a) => s + Math.abs(diasUteis(r, a.previsao) || 0), 0) / atrasadas.length) : 0;
+    const noTeste = ativ.filter((a) => a.previsao && a.previsao <= teste);
+    const concNoTeste = noTeste.filter((a) => a.status === "Concluído").length;
+    const prontidao = noTeste.length ? (concNoTeste / noTeste.length) * 100 : 0;
+    const pond = ativ.length ? ativ.reduce((s, a) => s + Number(a.pct || 0), 0) / ativ.length : 0;
+    // aderência: concluídas até a previsão / concluídas com previsão
+    const comConc = ativ.filter((a) => a.conclusao && a.previsao);
+    const noPrazo = comConc.filter((a) => a.conclusao <= a.previsao).length;
+    const aderencia = comConc.length ? (noPrazo / comConc.length) * 100 : null;
+    const blocos = uniq(todas.filter((a) => !FD.origem || a.origem === FD.origem).map((a) => a.bloco));
+    const consultores = uniq(todas.flatMap((a) => pessoas(a.consultor)));
+    const keyusers = uniq(todas.flatMap((a) => pessoas(a.key_user)));
+    const pts = S.data.pontos.filter((p) => p.status !== "Resolvido" && (!FD.consultor || (p.responsavel || "").includes(FD.consultor)));
+    const rot = S.data.roteiro;
+
+    // por frente
+    const porFrente = uniq(ativ.map((a) => a.origem + " · " + a.bloco)).map((k) => {
+      const [o, b] = k.split(" · "); const l = ativ.filter((a) => a.origem === o && a.bloco === b);
+      const rr = resumoFrente(l);
+      return { label: (ORIGEM_L[o] || o) + " — " + b, total: l.length, extra: rr.pct.toFixed(0) + "%",
+        partes: STATUS.map((s) => ({ nome: s, v: l.filter((a) => a.status === s).length, cor: CORES[s] })) };
+    }).sort((a, b) => b.total - a.total);
+    // por consultor
+    const porConsultor = consultores.map((c) => {
+      const l = ativ.filter((a) => pessoas(a.consultor).includes(c));
+      const atr = l.filter((a) => situacao(a)[0] === "Atrasada").length;
+      return { label: c, total: l.length, extra: l.length + (atr ? ` · ${atr} atras.` : ""),
+        partes: STATUS.map((s) => ({ nome: s, v: l.filter((a) => a.status === s).length, cor: CORES[s] })) };
+    }).filter((x) => x.total).sort((a, b) => b.total - a.total);
+    // por área (key user)
+    const porArea = keyusers.map((c) => {
+      const l = ativ.filter((a) => pessoas(a.key_user).includes(c));
+      return { label: c, total: l.length, extra: l.length,
+        partes: STATUS.map((s) => ({ nome: s, v: l.filter((a) => a.status === s).length, cor: CORES[s] })) };
+    }).filter((x) => x.total).sort((a, b) => b.total - a.total).slice(0, 12);
+    // entregas por semana
+    const sems = uniq(ativ.filter((a) => a.previsao).map((a) => semana(a.previsao)));
+    const porSemana = sems.map((s) => {
+      const l = ativ.filter((a) => a.previsao && semana(a.previsao) === s);
+      return { label: "Semana de " + fmtD(s), total: l.length, extra: l.length,
+        partes: STATUS.map((st) => ({ nome: st, v: l.filter((a) => a.status === st).length, cor: CORES[st] })) };
+    });
+    const sitDados = [["Concluída", "#1ED69E"], ["No prazo", "#7FB2F0"], ["Vence em até 2 dias", "#FFC000"], ["Atrasada", "#E05C5C"], ["Bloqueada", "#8B2B3A"], ["Sem data", "#4A5165"]]
+      .map(([n, cor]) => ({ nome: n, cor, v: ativ.filter((a) => situacao(a)[0] === n).length }));
+    const prox = ativ.filter((a) => a.status !== "Concluído" && a.previsao && a.previsao >= r && (diasUteis(r, a.previsao) || 99) <= 5).sort((a, b) => a.previsao.localeCompare(b.previsao));
+    const atrasoTop = atrasadas.slice().sort((a, b) => (a.previsao || "").localeCompare(b.previsao || ""));
+    const semDono = ativ.filter((a) => !a.consultor || /designar|definir/i.test(a.consultor));
+    const paradas = ativ.filter((a) => a.status === "Em andamento" && a.atualizado_em && diasUteis(String(a.atualizado_em).slice(0, 10), r) > 5);
+
+    const sel = (k, lista, label) => `<label class="fl"><span>${label}</span><select onchange="app.setF('${k}',this.value)"><option value="">Todos</option>${lista.map((o) => `<option value="${esc(o.v ?? o)}" ${(FD[k] === (o.v ?? o)) ? "selected" : ""}>${esc(o.l ?? o)}</option>`).join("")}</select></label>`;
+    const nFiltros = Object.values(FD).filter(Boolean).length;
+
+    return `
+      <div class="boletim-head">
+        <div><h2>Dashboard de acompanhamento</h2>
+          <div class="meta">Análise das ${todas.length} atividades do projeto · referência <b>${fmtD(r)}</b> · <b>${duTeste}</b> dias úteis até os testes integrados (${fmtD(teste)})</div></div>
+        <div class="no-print" style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn ghost dark small" onclick="window.print()">Imprimir / PDF</button>
+          <button class="btn small" onclick="app.exportar()">Exportar Excel</button>
+        </div>
+      </div>
+
+      <div class="section filtros no-print">
+        <h3>Filtros ${nFiltros ? `<span class="pill ok">${nFiltros} ativo(s)</span>` : '<span class="tag">nenhum filtro: projeto inteiro</span>'}</h3>
+        <div class="fgrid">
+          <label class="fl"><span>Período — de</span><input type="date" value="${esc(FD.de)}" onchange="app.setF('de',this.value)"></label>
+          <label class="fl"><span>até</span><input type="date" value="${esc(FD.ate)}" onchange="app.setF('ate',this.value)"></label>
+          ${sel("origem", Object.entries(ORIGEM_L).map(([v, l]) => ({ v, l })), "Frente")}
+          ${sel("bloco", blocos, "Bloco / fase")}
+          ${sel("consultor", consultores, "Consultor")}
+          ${sel("keyuser", keyusers, "Key user / área")}
+          ${sel("lado", LADOS, "Lado")}
+          ${sel("status", STATUS, "Status")}
+          ${sel("sit", ["No prazo", "Vence em até 2 dias", "Atrasada", "Concluída", "Bloqueada", "Sem data"], "Situação")}
+        </div>
+        <div class="fchips">
+          <button class="chip" onclick="app.periodo('sem')">Esta semana</button>
+          <button class="chip" onclick="app.periodo('prox')">Próximos 15 dias</button>
+          <button class="chip" onclick="app.periodo('ate-teste')">Até o teste (26/10)</button>
+          <button class="chip" onclick="app.periodo('venc')">Vencidas</button>
+          <button class="chip" onclick="app.setF('sit','Atrasada')">Só atrasadas</button>
+          <button class="chip" onclick="app.setF('lado','LT Fácil')">Só LT Fácil</button>
+          ${nFiltros ? `<button class="chip clear" onclick="app.limparF()">✕ Limpar filtros</button>` : ""}
+        </div>
+      </div>
+
+      <div class="cards">
+        <div class="card"><div class="lbl">Atividades no filtro</div><div class="val">${ativ.length}</div><div class="note">de ${todas.length} no projeto</div></div>
+        <div class="card"><div class="lbl">Avanço médio</div><div class="val">${pond.toFixed(0)}%</div><div class="note">${res.c} concluídas · ${res.e} em andamento</div></div>
+        <div class="card"><div class="lbl">Atrasadas</div><div class="val ${res.atr ? "red" : ""}">${res.atr}</div><div class="note">${atrasoMedio ? atrasoMedio + " dias úteis em média" : "nenhuma"}</div></div>
+        <div class="card"><div class="lbl">Prontidão p/ 26-10</div><div class="val ${prontidao < 50 ? "red" : ""}">${prontidao.toFixed(0)}%</div><div class="note">${concNoTeste} de ${noTeste.length} com previsão até lá</div></div>
+        <div class="card"><div class="lbl">Aderência ao prazo</div><div class="val">${aderencia === null ? "—" : aderencia.toFixed(0) + "%"}</div><div class="note">${comConc.length ? noPrazo + " de " + comConc.length + " entregues no prazo" : "sem entregas medidas"}</div></div>
+        <div class="card"><div class="lbl">Sem data</div><div class="val ${res.sd ? "red" : ""}">${res.sd}</div><div class="note">${semDono.length} sem consultor definido</div></div>
+      </div>
+
+      <div class="grid2">
+        <div class="section"><h3>Curva S — previsto × concluído <span class="tag">acumulado por semana</span></h3>${curvaS(ativ)}</div>
+        <div class="section"><h3>Situação das atividades</h3>${donut(sitDados)}</div>
+      </div>
+
+      <div class="grid2">
+        <div class="section"><h3>Avanço por frente <span class="tag">barra = status; número = % concluído</span></h3>${porFrente.length ? barrasEmpilhadas(porFrente) : '<div class="help">Nada no filtro.</div>'}</div>
+        <div class="section"><h3>Carga por consultor</h3>${porConsultor.length ? barrasEmpilhadas(porConsultor) : '<div class="help">Nada no filtro.</div>'}
+          <div class="legend">${STATUS.map((s) => `<span><i style="background:${CORES[s]}"></i>${s}</span>`).join("")}</div></div>
+      </div>
+
+      <div class="grid2">
+        <div class="section"><h3>Entregas previstas por semana</h3>${porSemana.length ? barrasEmpilhadas(porSemana) : '<div class="help">Sem previsões no filtro.</div>'}</div>
+        <div class="section"><h3>Envolvimento por área (key user)</h3>${porArea.length ? barrasEmpilhadas(porArea) : '<div class="help">Sem key user no filtro.</div>'}</div>
+      </div>
+
+      <div class="grid2">
+        <div class="section"><h3>Atrasos <span class="tag">${atrasoTop.length} atividades</span></h3>
+          ${atrasoTop.length ? `<div class="tbl-wrap"><table><tr><th>Cód.</th><th>Atividade</th><th>Consultor</th><th>Previsão</th><th>Atraso</th></tr>
+          ${atrasoTop.slice(0, 15).map((a) => `<tr><td class="c codes">${esc(a.codigo)}</td><td>${esc(a.atividade).slice(0, 70)}</td><td>${esc(a.consultor)}</td><td class="c">${fmtD(a.previsao)}</td><td class="c"><span class="pill bad">${Math.abs(diasUteis(r, a.previsao) || 0)} d.ú.</span></td></tr>`).join("")}</table></div>` : '<div class="help">Nenhuma atividade atrasada no filtro.</div>'}
+        </div>
+        <div class="section"><h3>Próximos 5 dias úteis <span class="tag">${prox.length} atividades</span></h3>
+          ${prox.length ? `<div class="tbl-wrap"><table><tr><th>Cód.</th><th>Atividade</th><th>Consultor</th><th>Previsão</th><th>Faltam</th></tr>
+          ${prox.slice(0, 15).map((a) => `<tr><td class="c codes">${esc(a.codigo)}</td><td>${esc(a.atividade).slice(0, 70)}</td><td>${esc(a.consultor)}</td><td class="c">${fmtD(a.previsao)}</td><td class="c"><span class="pill ${diasUteis(r, a.previsao) <= 2 ? "warn" : "info"}">${diasUteis(r, a.previsao)} d.ú.</span></td></tr>`).join("")}</table></div>` : '<div class="help">Nada vencendo nos próximos 5 dias úteis.</div>'}
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="section"><h3>Pontos de atenção em aberto <span class="tag">${pts.length}</span></h3>
+          <div class="tbl-wrap"><table><tr><th>Tipo</th><th>Total</th><th>Vencidos</th><th>No boletim</th></tr>
+          ${TIPOS.map((t) => { const l = pts.filter((p) => p.tipo === t); return `<tr><td>${t}</td><td class="c">${l.length}</td><td class="c">${l.filter((p) => p.prazo && p.prazo < r).length ? `<span class="pill bad">${l.filter((p) => p.prazo && p.prazo < r).length}</span>` : "-"}</td><td class="c">${l.filter((p) => p.no_boletim).length}</td></tr>`; }).join("")}
+          <tr class="group"><td>Total</td><td class="c">${pts.length}</td><td class="c">${pts.filter((p) => p.prazo && p.prazo < r).length}</td><td class="c">${pts.filter((p) => p.no_boletim).length}</td></tr></table></div>
+        </div>
+        <div class="section"><h3>Riscos de execução</h3>
+          <div class="tbl-wrap"><table><tr><th>Indicador</th><th>Qtd.</th><th>Leitura</th></tr>
+            <tr><td>Atividades sem consultor definido</td><td class="c">${semDono.length}</td><td class="muted">ninguém executa até alguém assumir</td></tr>
+            <tr><td>Em andamento sem atualização há +5 d.ú.</td><td class="c">${paradas.length}</td><td class="muted">possível parada silenciosa</td></tr>
+            <tr><td>Bloqueadas</td><td class="c">${ativ.filter((a) => a.status === "Bloqueado").length}</td><td class="muted">dependem de terceiros</td></tr>
+            <tr><td>Dependentes de TOTVS</td><td class="c">${ativ.filter((a) => a.lado === "TOTVS").length}</td><td class="muted">fora do controle da LT</td></tr>
+            <tr><td>Passos de teste reprovados / bloqueados</td><td class="c">${rot.filter((x) => ["Reprovado", "Bloqueado"].includes(x.resultado)).length}</td><td class="muted">roteiro preliminar</td></tr>
+          </table></div>
+        </div>
+      </div>`;
+  }
 
   // ---------- Boletim ----------
   function resumoFrente(list) {
@@ -255,14 +492,28 @@
     let html = `<h2>${titulo[0]}</h2><p class="sub">${titulo[1]}</p>
       <div class="cards"><div class="card"><div class="lbl">Atividades</div><div class="val">${r.n}</div></div><div class="card"><div class="lbl">% concluído</div><div class="val">${r.pct.toFixed(0)}%</div></div><div class="card"><div class="lbl">Concluídas</div><div class="val green">${r.c}</div></div><div class="card"><div class="lbl">Atrasadas</div><div class="val ${r.atr ? "red" : ""}">${r.atr}</div></div><div class="card"><div class="lbl">Sem data</div><div class="val">${r.sd}</div></div></div>
       <div class="toolbar"><input type="search" placeholder="Filtrar…" value="${esc(S.filtro)}" oninput="app.filtro(this.value)"><div class="right"><button class="btn ghost dark small" onclick="app.exportar()">Exportar Excel</button></div></div>
-      <div class="tbl-wrap"><table><tr><th>Cód.</th><th style="min-width:240px">Atividade</th><th>Lado</th><th>Consultor</th><th>Key user</th><th>Status</th><th>%</th><th>Início</th><th>Previsão</th><th>Conclusão</th><th>Dias úteis</th><th>Situação</th><th>Precedentes</th><th>Dependentes</th><th style="min-width:200px">Ponto de atenção</th><th style="min-width:200px">Observação</th></tr>`;
+      <div class="tbl-wrap"><table><tr><th>Cód.</th><th style="min-width:240px">Atividade</th><th>Lado</th><th>Consultor</th><th>Key user</th><th>Status</th><th>%</th><th>Início</th><th>Previsão</th><th>Conclusão</th><th>Dias úteis</th><th>Situação</th><th>Pré-requisito</th><th>Precedentes</th><th>Dependentes</th><th style="min-width:200px">Ponto de atenção</th><th style="min-width:200px">Observação</th></tr>`;
     let bloco = null;
     for (const a of vis) {
-      if (a.bloco !== bloco) { bloco = a.bloco; const rb = resumoFrente(list.filter((x) => x.bloco === bloco)); html += `<tr class="group"><td colspan="16">${esc(bloco)} <span class="tag" style="font-weight:normal;color:var(--muted)">· ${rb.n} atividades · ${rb.pct.toFixed(0)}% · ${rb.atr} atrasadas</span></td></tr>`; }
+      if (a.bloco !== bloco) { bloco = a.bloco; const rb = resumoFrente(list.filter((x) => x.bloco === bloco)); html += `<tr class="group"><td colspan="17">${esc(bloco)} <span class="tag" style="font-weight:normal;color:var(--muted)">· ${rb.n} atividades · ${rb.pct.toFixed(0)}% · ${rb.atr} atrasadas</span></td></tr>`; }
       const [s, c] = situacao(a); const du = a.previsao && a.status !== "Concluído" ? diasUteis(ref(), a.previsao) : "";
-      html += `<tr class="edit"><td class="c codes">${esc(a.codigo)}</td><td>${esc(a.atividade)}</td><td class="c">${inp("atividades", a, "lado", "select", LADOS)}</td><td>${inp("atividades", a, "consultor", "text")}</td><td>${inp("atividades", a, "key_user", "text")}</td><td>${inp("atividades", a, "status", "select", STATUS)}</td><td class="num">${inp("atividades", a, "pct", "pct")}</td><td class="c">${inp("atividades", a, "inicio", "date")}</td><td class="c">${inp("atividades", a, "previsao", "date")}</td><td class="c">${inp("atividades", a, "conclusao", "date")}</td><td class="c" style="color:${du < 0 ? "var(--red)" : "inherit"}">${du}</td><td class="c"><span class="pill ${c}">${s}</span></td><td class="codes">${esc(a.precedentes)}</td><td class="codes">${esc(dependentes(list, a.codigo))}</td><td>${inp("atividades", a, "ponto_atencao", "area")}</td><td>${inp("atividades", a, "obs", "area")}</td></tr>`;
+      html += `<tr class="edit"><td class="c codes">${esc(a.codigo)}</td><td>${esc(a.atividade)}</td><td class="c">${inp("atividades", a, "lado", "select", LADOS)}</td><td>${inp("atividades", a, "consultor", "text")}</td><td>${inp("atividades", a, "key_user", "text")}</td><td>${inp("atividades", a, "status", "select", STATUS)}</td><td class="num">${inp("atividades", a, "pct", "pct")}</td><td class="c">${inp("atividades", a, "inicio", "date")}</td><td class="c">${inp("atividades", a, "previsao", "date")}</td><td class="c">${inp("atividades", a, "conclusao", "date")}</td><td class="c" style="color:${du < 0 ? "var(--red)" : "inherit"}">${du}</td><td class="c"><span class="pill ${c}">${s}</span></td><td class="muted">${esc(a.pre_requisito)}</td><td class="codes">${esc(a.precedentes)}</td><td class="codes">${esc(dependentes(list, a.codigo))}</td><td>${inp("atividades", a, "ponto_atencao", "area")}</td><td>${inp("atividades", a, "obs", "area")}</td></tr>`;
     }
-    return html + "</table></div>";
+    html += "</table></div>";
+    if (origem === "portal") html += vPortalPerfis();
+    return html;
+  }
+  function vPortalPerfis() {
+    const pp = S.data.perfis_portal || [], ma = S.data.matriz_acesso || [];
+    if (!pp.length && !ma.length) return "";
+    const cel = (v) => { const t = String(v ?? "").trim(); const c = t === "Total" ? "ok" : t === "?" ? "warn" : (t === "—" || t === "") ? "off" : "info"; return `<td class="c"><span class="pill ${c}">${esc(t || "—")}</span></td>`; };
+    return `
+      ${pp.length ? `<div class="section" style="margin-top:16px"><h3>Perfis do Portal <span class="tag">quem usa e o que enxerga · fonte: cronograma v1.1</span></h3>
+        <div class="tbl-wrap"><table><tr><th>Cód.</th><th>Perfil</th><th>Usa?</th><th>Quem é</th><th>Escopo dos dados</th><th>O que faz</th><th>Fase</th><th>A confirmar</th></tr>
+        ${pp.map((x) => `<tr><td class="c codes">${esc(x.codigo)}</td><td><b>${esc(x.perfil)}</b></td><td class="c"><span class="pill ${x.usa_portal === "Sim" ? "ok" : "off"}">${esc(x.usa_portal)}</span></td><td class="muted">${esc(x.quem_e)}</td><td class="muted">${esc(x.escopo_dados)}</td><td class="muted">${esc(x.o_que_faz)}</td><td class="c codes">${esc(x.fase)}</td><td class="muted">${esc(x.obs)}</td></tr>`).join("")}</table></div></div>` : ""}
+      ${ma.length ? `<div class="section"><h3>Matriz de acesso: módulo × perfil <span class="tag">Total · Próprios · Consulta · — · ? a confirmar</span></h3>
+        <div class="tbl-wrap"><table><tr><th>Área</th><th>Funcionalidade</th><th>Funcionário</th><th>Cliente</th><th>Transportadora</th><th>Representante</th><th>Vendedor</th><th>Base no código</th></tr>
+        ${ma.map((x) => `<tr><td class="muted">${esc(x.area)}</td><td>${esc(x.funcionalidade)}</td>${cel(x.funcionario)}${cel(x.cliente)}${cel(x.transportadora)}${cel(x.representante)}${cel(x.vendedor)}<td class="codes">${esc(x.base_codigo)}</td></tr>`).join("")}</table></div></div>` : ""}`;
   }
   function labelCells() {
     document.querySelectorAll("#main table").forEach((t) => {
@@ -400,9 +651,9 @@
     const wb = XLSX.utils.book_new();
     const D = (d) => (d ? new Date(d + "T00:00:00") : null);
     const sheet = (name, header, rows) => { const ws = XLSX.utils.aoa_to_sheet([header, ...rows]); ws["!cols"] = header.map((h) => ({ wch: Math.min(50, Math.max(10, h.length + 4)) })); XLSX.utils.book_append_sheet(wb, ws, name); };
-    const at = S.data.atividades;
-    const atRows = (o) => at.filter((a) => a.origem === o).map((a) => [a.bloco, a.codigo, a.atividade, a.lado, a.consultor, a.key_user, a.status, Number(a.pct || 0) / 100, D(a.inicio), D(a.previsao), D(a.conclusao), a.previsao && a.status !== "Concluído" ? diasUteis(ref(), a.previsao) : "", situacao(a)[0], a.precedentes, dependentes(at.filter((x) => x.origem === o), a.codigo), a.ponto_atencao, a.obs, a.atualizado_por, a.atualizado_em ? new Date(a.atualizado_em) : null]);
-    const H = ["Bloco", "ID", "Atividade", "Lado", "Consultor", "Key user", "Status", "% concluído", "Início", "Previsão", "Conclusão", "Dias úteis até a previsão", "Situação", "Precedentes", "Dependentes", "Ponto de atenção", "Observação do consultor", "Atualizado por", "Atualizado em"];
+    const at = S.view === "dashboard" && Object.values(FD).some(Boolean) ? filtrarAtiv() : S.data.atividades;
+    const atRows = (o) => at.filter((a) => a.origem === o).map((a) => [a.bloco, a.codigo, a.atividade, a.lado, a.consultor, a.key_user, a.status, Number(a.pct || 0) / 100, D(a.inicio), D(a.previsao), D(a.conclusao), a.previsao && a.status !== "Concluído" ? diasUteis(ref(), a.previsao) : "", situacao(a)[0], a.pre_requisito, a.precedentes, dependentes(at.filter((x) => x.origem === o), a.codigo), a.ponto_atencao, a.obs, a.atualizado_por, a.atualizado_em ? new Date(a.atualizado_em) : null]);
+    const H = ["Bloco", "ID", "Atividade", "Lado", "Consultor", "Key user", "Status", "% concluído", "Início", "Previsão", "Conclusão", "Dias úteis até a previsão", "Situação", "Pré-requisito", "Precedentes", "Dependentes", "Ponto de atenção", "Observação do consultor", "Atualizado por", "Atualizado em"];
     sheet("Parâmetros", ["Chave", "Valor"], S.data.parametros.map((p) => [p.chave, p.valor]));
     sheet("Equipe", ["Frente", "Key user (AVC)", "Área do key user", "Consultor LT", "Apoio LT", "Contato", "Observação"], S.data.equipe.map((e) => [e.frente, e.key_user, e.area_key_user, e.consultor, e.apoio, e.contato, e.obs]));
     sheet("Cronograma Template", H, atRows("template")); sheet("Cronograma Portal", H, atRows("portal")); sheet("Customizações", H, atRows("custom"));
@@ -416,7 +667,7 @@
   // ---------- util ----------
   function toast(msg, err) { const t = document.createElement("div"); t.className = "toast" + (err ? " err" : ""); t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), err ? 6000 : 2500); }
 
-  window.app = { login, logout, show, mark, saveAll, discard, setRef, salvarTexto, filtro, novoPonto, criarUsuario, setPerfil, trocarSenha, exportar, toast, menu, collapse };
+  window.app = { login, logout, show, mark, saveAll, discard, setRef, salvarTexto, filtro, novoPonto, criarUsuario, setPerfil, trocarSenha, exportar, toast, menu, collapse, setF, limparF, periodo };
   window.addEventListener("hashchange", () => { if (S.user && location.hash.replace("#", "") !== S.view) show(location.hash.replace("#", "") || "boletim"); });
   const _show = show; window.app.show = (v) => { _show(v); if (v === "ajuda") carregarLog(); };
   boot();
