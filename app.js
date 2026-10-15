@@ -54,7 +54,7 @@
 
   // ---------- carga ----------
   async function loadAll() {
-    const tabs = ["parametros", "equipe", "papeis", "atividades", "roteiro", "pontos", "boletim_texto", "perfis"];
+    const tabs = ["parametros", "equipe", "papeis", "atividades", "roteiro", "pontos", "boletim_texto", "perfis", "perfis_portal", "matriz_acesso"];
     const res = await Promise.all(tabs.map((t) => sb.from(t).select("*").order(t === "parametros" ? "chave" : t === "perfis" ? "nome" : t === "pontos" ? "codigo" : "ordem")));
     res.forEach((r, i) => { if (r.error) toast("Erro ao ler " + tabs[i] + ": " + r.error.message, true); S.data[tabs[i]] = r.data || []; });
     S.data.atividades.sort((a, b) => a.origem.localeCompare(b.origem) || a.ordem - b.ordem);
