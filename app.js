@@ -315,29 +315,52 @@
     }).join("")}</div>`;
   }
   function curvaS(ativ) {
-    const comPrev = ativ.filter((a) => a.previsao);
-    if (!comPrev.length) return `<div class="help">Sem datas de previsão no filtro atual.</div>`;
-    const sems = uniq(comPrev.map((a) => semana(a.previsao)));
     const total = ativ.length;
-    let accP = 0, accR = 0;
-    const pts = sems.map((s) => {
-      accP += comPrev.filter((a) => semana(a.previsao) === s).length;
-      accR += ativ.filter((a) => a.conclusao && semana(a.conclusao) === s).length;
-      return { s, p: accP, r: accR };
-    });
-    const W = 100, H = 46, n = Math.max(1, pts.length - 1), maxY = Math.max(total, accP, 1);
-    const X = (i) => (n ? (i / n) * W : 0), Y = (v) => H - (v / maxY) * (H - 6) - 3;
-    const hoje = ref();
-    const linha = (key, cor, dash) => `<polyline fill="none" stroke="${cor}" stroke-width="1.1" ${dash ? 'stroke-dasharray="2 1.5"' : ""} points="${pts.map((p, i) => `${X(i).toFixed(2)},${Y(p[key]).toFixed(2)}`).join(" ")}"/>`;
-    const idxHoje = pts.findIndex((p) => p.s >= semana(hoje));
-    return `<svg class="svgchart" viewBox="0 0 100 ${H}" preserveAspectRatio="none" role="img" aria-label="Curva S: previsto x concluído">
-      <line x1="0" y1="${Y(0)}" x2="100" y2="${Y(0)}" stroke="#2A3142" stroke-width=".5"/>
-      ${idxHoje >= 0 ? `<line x1="${X(idxHoje).toFixed(2)}" y1="0" x2="${X(idxHoje).toFixed(2)}" y2="${H}" stroke="#FFC000" stroke-width=".4" stroke-dasharray="1.5 1.5"/>` : ""}
-      ${linha("p", "#9AA3B8", true)}${linha("r", "#1ED69E", false)}
-      ${pts.map((p, i) => `<circle class="pt" cx="${X(i).toFixed(2)}" cy="${Y(p.r).toFixed(2)}" r="1.5" fill="#1ED69E" data-tip="${esc("Semana de " + fmtD(p.s) + "|Previsto acumulado: " + p.p + "|Concluído acumulado: " + p.r + "|Diferença: " + (p.r - p.p))}"/>`).join("")}
-    </svg>
-    <div class="legend"><span><i style="background:#9AA3B8"></i>Previsto acumulado</span><span><i style="background:#1ED69E"></i>Concluído acumulado</span><span><i style="background:#FFC000"></i>Semana atual</span></div>
-    <div class="xaxis">${pts.map((p, i) => (i === 0 || i === pts.length - 1 || i === Math.floor(pts.length / 2) ? `<span style="left:${X(i).toFixed(1)}%">${fmtD(p.s).slice(0, 5)}</span>` : "")).join("")}</div>`;
+    if (!total) return `<div class="help">Nada no filtro.</div>`;
+    const comPrev = ativ.filter((a) => a.previsao), comConc = ativ.filter((a) => a.conclusao);
+    if (!comPrev.length && !comConc.length) return `<div class="help">Sem datas de previsão ou conclusão no filtro atual.</div>`;
+    const r = ref(), semHoje = semana(r);
+    // eixo semanal contínuo: da primeira data do projeto até a última previsão (ou hoje)
+    const datas = comPrev.map((a) => a.previsao).concat(comConc.map((a) => a.conclusao),
+      ativ.filter((a) => a.inicio).map((a) => a.inicio), [r]);
+    const ini = semana(datas.reduce((m, d) => (d < m ? d : m)));
+    const fim = semana(datas.reduce((m, d) => (d > m ? d : m)));
+    const sems = [];
+    for (let x = ini; x <= fim && sems.length < 120; x = addDias(x, 7)) sems.push(x);
+    const pts = sems.map((x) => ({
+      s: x,
+      p: comPrev.filter((a) => semana(a.previsao) <= x).length,
+      r: comConc.filter((a) => semana(a.conclusao) <= x).length
+    }));
+    const iHoje = Math.max(0, sems.findIndex((x) => x >= semHoje));
+    const W = 100, H = 46, n = Math.max(1, pts.length - 1);
+    const X = (i) => (i / n) * W, Y = (v) => H - (v / total) * (H - 6) - 3;
+    const pol = (arr, key, cor, dash) => arr.length ? `<polyline fill="none" stroke="${cor}" stroke-width="1.2" stroke-linejoin="round" ${dash ? 'stroke-dasharray="2 1.5"' : ""} points="${arr.map((o) => `${X(o.i).toFixed(2)},${Y(o[key]).toFixed(2)}`).join(" ")}"/>` : "";
+    const todos = pts.map((o, i) => Object.assign({ i }, o));
+    const ateHoje = todos.filter((o) => o.i <= iHoje);           // realizado só até a semana atual
+    const pct = (v) => ((v / total) * 100).toFixed(0) + "%";
+    const prevHoje = comPrev.filter((a) => a.previsao <= r).length;
+    const feitas = comConc.length;
+    const semData = ativ.filter((a) => !a.previsao).length;
+    const fisico = ativ.reduce((acc, a) => acc + Number(a.pct || 0), 0) / total;
+    const grade = [0, 0.25, 0.5, 0.75, 1].map((f) => `<line x1="0" y1="${Y(total * f).toFixed(2)}" x2="100" y2="${Y(total * f).toFixed(2)}" stroke="#2A3142" stroke-width="${f ? ".3" : ".5"}" ${f ? 'stroke-dasharray="1 2"' : ""}/>`).join("");
+    return `
+      <div class="scurve">
+        <div class="ylab"><span>100%</span><span>75%</span><span>50%</span><span>25%</span><span>0%</span></div>
+        <div class="splot">
+          <svg class="svgchart" viewBox="0 0 100 ${H}" preserveAspectRatio="none" role="img" aria-label="Curva S: previsto × realizado">
+            ${grade}
+            <line x1="${X(iHoje).toFixed(2)}" y1="0" x2="${X(iHoje).toFixed(2)}" y2="${H}" stroke="#FFC000" stroke-width=".4" stroke-dasharray="1.5 1.5"/>
+            ${pol(todos, "p", "#9AA3B8", true)}${pol(ateHoje, "r", "#1ED69E", false)}
+            <circle cx="${X(iHoje).toFixed(2)}" cy="${Y(todos[iHoje].p).toFixed(2)}" r="1.4" fill="#9AA3B8"/>
+            <circle cx="${X(iHoje).toFixed(2)}" cy="${Y(todos[iHoje].r).toFixed(2)}" r="1.8" fill="#1ED69E"/>
+            ${todos.map((o) => `<rect class="hit" x="${(X(o.i) - W / n / 2).toFixed(2)}" y="0" width="${(W / n).toFixed(2)}" height="${H}" fill="transparent" data-tip="${esc("Semana de " + fmtD(o.s) + (o.i === iHoje ? " (semana atual)" : o.i > iHoje ? " (futuro)" : "") + "|Previsto acumulado: " + o.p + " de " + total + " (" + pct(o.p) + ")" + (o.i <= iHoje ? "|Concluído acumulado: " + o.r + " (" + pct(o.r) + ")|Diferença: " + (o.r - o.p) : "|Realizado só é traçado até a semana atual"))}"/>`).join("")}
+          </svg>
+          <div class="xaxis">${todos.map((o) => (o.i === 0 || o.i === n || o.i === iHoje ? `<span style="left:${X(o.i).toFixed(1)}%">${fmtD(o.s).slice(0, 5)}</span>` : "")).join("")}</div>
+        </div>
+      </div>
+      <div class="legend"><span><i style="background:#9AA3B8"></i>Previsto acumulado</span><span><i style="background:#1ED69E"></i>Concluído acumulado</span><span><i style="background:#FFC000"></i>Semana atual</span></div>
+      <div class="help">Base: as <b>${total}</b> atividades do filtro. Até ${fmtD(r)} o plano previa <b>${prevHoje}</b> concluída(s) (${pct(prevHoje)}) e há <b>${feitas}</b> concluída(s) (${pct(feitas)}); o avanço físico, somando os percentuais em andamento, é de <b>${fisico.toFixed(0)}%</b>.${semData ? ` A linha do previsto para em ${pct(comPrev.length)} porque <b>${semData}</b> atividade(s) ainda não têm data.` : ""}</div>`;
   }
   function donut(dados) {
     const tot = dados.reduce((s, d) => s + d.v, 0) || 1;
@@ -458,7 +481,7 @@
       </div>
 
       <div class="grid2">
-        <div class="section"><h3>Curva S — previsto × concluído <span class="tag">acumulado por semana</span></h3>${curvaS(ativ)}</div>
+        <div class="section"><h3>Curva S — previsto × realizado <span class="tag">% acumulado por semana · o realizado para na semana atual</span></h3>${curvaS(ativ)}</div>
         <div class="section"><h3>Situação das atividades</h3>${donut(sitDados)}</div>
       </div>
 
