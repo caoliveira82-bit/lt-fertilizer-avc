@@ -12,7 +12,7 @@
   const LADOS = ["LT Fácil", "TOTVS", "AVC"];
   const VIEWS = [
     ["boletim", "Boletim"], ["dashboard", "Dashboard"], ["template", "Template"], ["portal", "Portal"], ["custom", "Customizações"],
-    ["roteiro", "Roteiro de testes"], ["pontos", "Pontos de atenção"], ["equipe", "Equipe"], ["usuarios", "Usuários"], ["ajuda", "Ajuda"]
+    ["fluxos", "Fluxos de processo"], ["roteiro", "Roteiro de testes"], ["pontos", "Pontos de atenção"], ["equipe", "Equipe"], ["usuarios", "Usuários"], ["ajuda", "Ajuda"]
   ];
 
   const S = { user: null, perfil: null, view: "boletim", data: {}, dirty: {}, filtro: "" };
@@ -89,7 +89,8 @@
     boletim: '<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/>',
     dashboard: '<path d="M4 20V9M9.5 20V4M15 20v-7M20.5 20v-11"/>', template: '<path d="M3 5h18M3 12h18M3 19h18"/><path d="M7 5v14"/>',
     portal: '<path d="M3 7h13v10H3z"/><path d="M16 10h3l2 3v4h-5"/><circle cx="7" cy="18" r="1.5"/><circle cx="18" cy="18" r="1.5"/>',
-    custom: '<path d="M12 3l2.5 5 5.5.8-4 3.9.9 5.5L12 15.6 7.1 18.2l.9-5.5-4-3.9 5.5-.8z"/>', roteiro: '<path d="M5 4h14v16H5z"/><path d="M9 9l2 2 4-4M9 15l2 2 4-4"/>',
+    custom: '<path d="M12 3l2.5 5 5.5.8-4 3.9.9 5.5L12 15.6 7.1 18.2l.9-5.5-4-3.9 5.5-.8z"/>',
+    fluxos: '<rect x="3" y="3" width="7" height="5" rx="1"/><rect x="14" y="8.5" width="7" height="5" rx="1"/><rect x="3" y="14" width="7" height="5" rx="1"/><path d="M10 5.5h2.5a1.5 1.5 0 011.5 1.5v1M10 16.5h2.5a1.5 1.5 0 001.5-1.5v-1"/>', roteiro: '<path d="M5 4h14v16H5z"/><path d="M9 9l2 2 4-4M9 15l2 2 4-4"/>',
     pontos: '<path d="M12 3l10 18H2z"/><path d="M12 10v4M12 17h.01"/>', equipe: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0113 0"/><circle cx="17" cy="9" r="2.5"/><path d="M15 20h6.5a5 5 0 00-5-5"/>',
     usuarios: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/><path d="M19 3l2 2-2 2"/>', ajuda: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 015 0c0 1.5-2.5 2-2.5 3.5M12 17h.01"/>'
   };
@@ -110,7 +111,7 @@
     document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("active", b.dataset.v === v));
     const vt = $("view-title"); if (vt) vt.textContent = (VIEWS.find(([k]) => k === v) || [])[1] || "";
     menu(false);
-    const r = { boletim: vBoletim, dashboard: vDashboard, template: () => vAtividades("template"), portal: () => vAtividades("portal"), custom: () => vAtividades("custom"), roteiro: vRoteiro, pontos: vPontos, equipe: vEquipe, usuarios: vUsuarios, ajuda: vAjuda }[v] || vBoletim;
+    const r = { boletim: vBoletim, dashboard: vDashboard, template: () => vAtividades("template"), portal: () => vAtividades("portal"), custom: () => vAtividades("custom"), fluxos: vFluxos, roteiro: vRoteiro, pontos: vPontos, equipe: vEquipe, usuarios: vUsuarios, ajuda: vAjuda }[v] || vBoletim;
     $("main").innerHTML = r();
     labelCells();
     window.scrollTo(0, 0);
@@ -629,6 +630,105 @@
   }
   function filtro(v) { S.filtro = v; const el = $("main"); const y = window.scrollY; el.innerHTML = ({ template: () => vAtividades("template"), portal: () => vAtividades("portal"), custom: () => vAtividades("custom"), roteiro: vRoteiro, pontos: vPontos })[S.view](); labelCells(); window.scrollTo(0, y); const i = el.querySelector("input[type=search]"); i.focus(); i.setSelectionRange(v.length, v.length); }
 
+  // ---------- Fluxos de processo ----------
+  const FLX_ARQ = "fluxos.html";
+  const FLX_TABS = [["diagrama", "Diagrama"], ["etapas", "Etapas"], ["integracoes", "Trocas entre sistemas"], ["atencao", "Pontos em aberto"]];
+  let FLX = null;
+  async function fluxosMeta() {
+    if (FLX) return FLX;
+    try {
+      const t = await (await fetch(FLX_ARQ, { cache: "no-store" })).text();
+      const i = t.indexOf("const FLOWS=");
+      if (i < 0) throw new Error("sem FLOWS");
+      let j = t.indexOf("[", i), k = j, d = 0, str = false, esc2 = false;
+      for (; k < t.length; k++) {
+        const c = t[k];
+        if (str) { if (esc2) esc2 = false; else if (c === "\\") esc2 = true; else if (c === '"') str = false; continue; }
+        if (c === '"') str = true;
+        else if (c === "[") d++;
+        else if (c === "]") { d--; if (!d) break; }
+      }
+      FLX = JSON.parse(t.slice(j, k + 1)).map((f) => ({
+        key: f.key, name: f.name, title: f.title, badge: f.badge || "",
+        etapas: (f.nodes || []).length, ligacoes: (f.edges || []).length,
+        pts: Array.isArray(f.findings) ? f.findings.length : Number(f.findings || 0),
+        rotulo: f.findOne || "Ponto em aberto",
+        pools: (f.pools || []).map((p) => p.name),
+        raias: [...new Set((f.lanes || []).map((l) => l.name))],
+        fonte: String(f.foot || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim()
+      }));
+    } catch (e) { FLX = null; }
+    return FLX;
+  }
+  function vFluxos() {
+    setTimeout(fluxosFill, 0);
+    return `
+      <div class="boletim-head">
+        <div><h2>Fluxos de processo</h2>
+          <div class="meta">Processos desenhados para a AVC entre <b>Totvs</b>, <b>LT Fácil</b> e <b>Mic Sistemas</b>. Clique em um fluxo para abrir o diagrama, as etapas, as trocas entre sistemas e os pontos em aberto.</div></div>
+        <div class="no-print" style="display:flex;gap:8px;flex-wrap:wrap">
+          <a class="btn ghost dark small" href="${FLX_ARQ}" target="_blank" rel="noopener">Abrir em tela cheia</a>
+        </div>
+      </div>
+      <div id="flx-cards"><div class="help">Carregando os fluxos…</div></div>
+      <div id="flx-emb"></div>`;
+  }
+  async function fluxosFill() {
+    const alvo = $("flx-cards"); if (!alvo) return;
+    const l = await fluxosMeta();
+    if (!l || !l.length) {
+      alvo.innerHTML = `<div class="help">Não consegui ler <b>${esc(FLX_ARQ)}</b>. Confirme que o arquivo foi publicado junto com a página — <a href="${esc(FLX_ARQ)}" target="_blank" rel="noopener">tentar abrir direto</a>.</div>`;
+      return;
+    }
+    const som = (c) => l.reduce((a, f) => a + f[c], 0);
+    const rascunhos = l.filter((f) => /rascunho/i.test(f.badge)).length;
+    alvo.innerHTML = `
+      <div class="cards">
+        <div class="card"><div class="lbl">Fluxos desenhados</div><div class="val">${l.length}</div><div class="note">${rascunhos} ainda em rascunho</div></div>
+        <div class="card"><div class="lbl">Etapas mapeadas</div><div class="val">${som("etapas")}</div><div class="note">${som("ligacoes")} conexões entre elas</div></div>
+        <div class="card"><div class="lbl">Pontos em aberto</div><div class="val ${som("pts") ? "red" : ""}">${som("pts")}</div><div class="note">decisões e lacunas a validar</div></div>
+        <div class="card"><div class="lbl">Sistemas envolvidos</div><div class="val">${uniq(l.flatMap((f) => f.pools)).length}</div><div class="note">${esc(uniq(l.flatMap((f) => f.pools)).join(" · "))}</div></div>
+      </div>
+      <div class="flxgrid">
+        ${l.map((f) => `
+          <article class="flxcard" id="flxc-${esc(f.key)}">
+            <header>
+              <div><h3>${esc(f.title)}</h3>
+                <div class="flxsub">${esc(f.name)}${f.badge ? ` · <span class="pill ${/rascunho/i.test(f.badge) ? "warn" : "info"}">${esc(f.badge)}</span>` : ""}</div></div>
+            </header>
+            <div class="flxnums">
+              <span><b>${f.etapas}</b> etapas</span><span><b>${f.ligacoes}</b> conexões</span>
+              <span><b>${f.raias.length}</b> raias</span><span class="${f.pts ? "warn" : ""}"><b>${f.pts}</b> em aberto</span>
+            </div>
+            <div class="flxpools">${f.pools.map((p) => `<span class="pill ${p === "LT Fácil" ? "ok" : p === "Totvs" ? "info" : "off"}">${esc(p)}</span>`).join("")}</div>
+            <p class="flxfonte" data-tip="${esc(f.fonte.slice(0, 600))}">${esc(f.fonte.slice(0, 150))}${f.fonte.length > 150 ? "…" : ""}</p>
+            <div class="flxacts">
+              <button class="btn small" onclick="app.verFluxo(${esc(JSON.stringify(f.key))})">Ver o fluxo</button>
+              ${FLX_TABS.slice(1).map(([t, nome]) => `<button class="chip mini" onclick="app.abaFluxo(${esc(JSON.stringify(f.key))},${esc(JSON.stringify(t))})">${esc(nome)}</button>`).join("")}
+            </div>
+          </article>`).join("")}
+      </div>`;
+    verFluxo(S.fluxoSel && l.some((f) => f.key === S.fluxoSel) ? S.fluxoSel : l[0].key, S.fluxoTab || "diagrama", true);
+  }
+  function verFluxo(key, tab, quieto) {
+    S.fluxoSel = key; S.fluxoTab = tab || "diagrama";
+    const cx = $("flx-emb"); if (!cx) return;
+    const f = (FLX || []).find((x) => x.key === key);
+    const url = `${FLX_ARQ}#${key}${S.fluxoTab && S.fluxoTab !== "diagrama" ? "-" + S.fluxoTab : ""}`;
+    cx.innerHTML = `
+      <div class="section flxemb">
+        <h3>${esc(f ? f.title : key)} <span class="tag">${esc((FLX_TABS.find((t) => t[0] === S.fluxoTab) || FLX_TABS[0])[1])}</span>
+          <a class="chip mini no-print" style="float:right" href="${esc(url)}" target="_blank" rel="noopener">Abrir em nova aba ↗</a></h3>
+        <div class="flxtabs no-print">${FLX_TABS.map(([t, nome]) => `<button class="chip ${S.fluxoTab === t ? "on" : ""}" onclick="app.abaFluxo(${esc(JSON.stringify(key))},${esc(JSON.stringify(t))})">${esc(nome)}</button>`).join("")}</div>
+        <div class="flxframe-wrap"><iframe class="flxframe" src="${esc(url)}" title="${esc(f ? f.title : key)}" loading="lazy"></iframe></div>
+        <div class="help no-print">O painel acima é o mesmo arquivo de fluxos da LT, embutido aqui. Em telas pequenas, prefira “Abrir em nova aba”.</div>
+        <div class="help only-print">Fluxo “${esc(f ? f.title : key)}” — o diagrama não sai na impressão desta página; imprima pelo painel de fluxos.</div>
+      </div>`;
+    document.querySelectorAll(".flxcard").forEach((c) => c.classList.toggle("on", c.id === "flxc-" + key));
+    if (!quieto) { const el = $("flx-emb"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  }
+  function abaFluxo(key, tab) { verFluxo(key, tab); }
+
   // ---------- Roteiro ----------
   function vRoteiro() {
     const list = S.data.roteiro, f = S.filtro.toLowerCase();
@@ -771,7 +871,7 @@
   // ---------- util ----------
   function toast(msg, err) { const t = document.createElement("div"); t.className = "toast" + (err ? " err" : ""); t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), err ? 6000 : 2500); }
 
-  window.app = { login, logout, show, mark, saveAll, discard, setRef, salvarTexto, filtro, novoPonto, criarUsuario, setPerfil, trocarSenha, exportar, toast, menu, collapse, setF, limparF, periodo, setMulti, abrirAtiv, fecharDet, verLista, irPontos };
+  window.app = { login, logout, show, mark, saveAll, discard, setRef, salvarTexto, filtro, novoPonto, criarUsuario, setPerfil, trocarSenha, exportar, toast, menu, collapse, setF, limparF, periodo, setMulti, abrirAtiv, fecharDet, verLista, irPontos, verFluxo, abaFluxo };
   window.addEventListener("hashchange", () => { if (S.user && location.hash.replace("#", "") !== S.view) show(location.hash.replace("#", "") || "boletim"); });
   const _show = show; window.app.show = (v) => { _show(v); if (v === "ajuda") carregarLog(); };
   boot();
